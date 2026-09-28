@@ -17,6 +17,7 @@ import (
 type SettingHandler struct {
 	settingService           *service.SettingService
 	notificationEmailService *service.NotificationEmailService
+	downstreamPricingService *service.DownstreamPricingSyncService
 	version                  string
 }
 
@@ -32,6 +33,10 @@ func NewSettingHandler(settingService *service.SettingService, version string) *
 // changing the constructor signature used by existing tests.
 func (h *SettingHandler) SetNotificationEmailService(notificationEmailService *service.NotificationEmailService) {
 	h.notificationEmailService = notificationEmailService
+}
+
+func (h *SettingHandler) SetDownstreamPricingService(downstreamPricingService *service.DownstreamPricingSyncService) {
+	h.downstreamPricingService = downstreamPricingService
 }
 
 // GetPublicSettings 获取公开设置
@@ -124,6 +129,19 @@ func (h *SettingHandler) GetPublicSettings(c *gin.Context) {
 
 		AllowUserViewErrorRequests: settings.AllowUserViewErrorRequests,
 	})
+}
+
+func (h *SettingHandler) GetPublicPricing(c *gin.Context) {
+	if h.downstreamPricingService == nil {
+		response.InternalError(c, "pricing service is not configured")
+		return
+	}
+	pricing, err := h.downstreamPricingService.GetPublic(c.Request.Context())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	response.Success(c, pricing)
 }
 
 // UnsubscribeNotificationEmail handles optional notification email opt-outs.

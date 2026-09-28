@@ -17,6 +17,7 @@ import (
 	_ "image/png"
 	"io"
 	"log"
+	"log/slog"
 	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
@@ -46,7 +47,18 @@ const (
 	testClaudeAPIURL            = "https://api.anthropic.com/v1/messages?beta=true"
 	chatgptCodexAPIURL          = "https://chatgpt.com/backend-api/codex/responses"
 	defaultAntigravityTestModel = "claude-sonnet-4-6"
+
+	scheduledAccountTestPrompt        = "Reply exactly OK."
+	scheduledOpenAIMaxOutputTokens    = 64
+	scheduledAnthropicMaxOutputTokens = 16
 )
+
+type scheduledAccountTestContextKey struct{}
+
+func isScheduledAccountTest(ctx context.Context) bool {
+	lightweight, _ := ctx.Value(scheduledAccountTestContextKey{}).(bool)
+	return lightweight
+}
 
 // TestEvent represents a SSE event for account testing
 type TestEvent struct {
@@ -353,6 +365,25 @@ func createTestPayload(modelID string) (map[string]any, error) {
 	}, nil
 }
 
+func createScheduledClaudeTestPayload(modelID string) map[string]any {
+	return map[string]any{
+		"model": modelID,
+		"messages": []map[string]any{
+			{
+				"role": "user",
+				"content": []map[string]any{
+					{
+						"type": "text",
+						"text": scheduledAccountTestPrompt,
+					},
+				},
+			},
+		},
+		"max_tokens": scheduledAnthropicMaxOutputTokens,
+		"stream":     true,
+	}
+}
+
 // TestAccountConnection tests an account's connection by sending a test request
 // All account types use full Claude Code client characteristics, only auth header differs
 // modelID is optional - if empty, defaults to claude.DefaultTestModel
@@ -542,10 +573,18 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 	c.Writer.Header().Set("X-Accel-Buffering", "no")
 	c.Writer.Flush()
 
-	// Create Claude Code style payload (same for all account types)
-	payload, err := createTestPayload(testModelID)
-	if err != nil {
-		return s.sendErrorAndEnd(c, "Failed to create test payload")
+	// Scheduled probes only need to verify that the configured model can return
+	// a minimal response. Manual connection tests keep the full Claude Code
+	// request so administrators can still validate client compatibility.
+	var payload map[string]any
+	if isScheduledAccountTest(ctx) {
+		payload = createScheduledClaudeTestPayload(testModelID)
+	} else {
+		var payloadErr error
+		payload, payloadErr = createTestPayload(testModelID)
+		if payloadErr != nil {
+			return s.sendErrorAndEnd(c, "Failed to create test payload")
+		}
 	}
 	payloadBytes, _ := json.Marshal(payload)
 
@@ -596,9 +635,17 @@ func (s *AccountTestService) testClaudeAccountConnection(c *gin.Context, account
 		body, _ := io.ReadAll(resp.Body)
 		errMsg := fmt.Sprintf("API returned %d: %s", resp.StatusCode, string(body))
 
-		// 403 表示账号被上游封禁，标记为 error 状态
+		// 中转 API Key 的 403 只做临时摘除，避免上游短暂计费或权限异常变成永久停用。
 		if resp.StatusCode == http.StatusForbidden {
-			_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
+			if account.Type == AccountTypeAPIKey {
+				until := time.Now().Add(time.Duration(apiKey403CooldownMinutesDefault) * time.Minute)
+				reason := "Scheduled account test 403 temporary cooldown: " + errMsg
+				if err := s.accountRepo.SetTempUnschedulable(ctx, account.ID, until, reason); err != nil {
+					slog.Warn("account_test_api_key_403_temp_unschedulable_failed", "account_id", account.ID, "error", err)
+				}
+			} else {
+				_ = s.accountRepo.SetError(ctx, account.ID, errMsg)
+			}
 		}
 
 		return s.sendErrorAndEnd(c, errMsg)
@@ -874,6 +921,9 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 		upstreamTestModelID = normalizeOpenAIModelForUpstream(credentialAccount, testModelID)
 	}
 	payload := createOpenAITestPayload(upstreamTestModelID, isOAuth)
+	if isScheduledAccountTest(ctx) {
+		payload = createScheduledOpenAITestPayload(upstreamTestModelID, isOAuth)
+	}
 	payloadBytes, _ := json.Marshal(payload)
 
 	// Send test_start event once. A task-invalid Agent Identity response may
@@ -970,7 +1020,7 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	}
 
 	// Process SSE stream
-	return s.processOpenAIStream(c, resp.Body)
+	return s.processOpenAIStream(c, account, resp.Body)
 }
 
 // testGrokAccountConnection routes Grok admin connectivity tests by explicit mode first,
@@ -1264,7 +1314,7 @@ func (s *AccountTestService) testGrokResponsesConnection(c *gin.Context, ctx con
 		return s.sendErrorAndEnd(c, fmt.Sprintf("Grok Responses API returned %d: %s", resp.StatusCode, string(body)))
 	}
 
-	return s.processOpenAIStream(c, resp.Body)
+	return s.processOpenAIStream(c, account, resp.Body)
 }
 
 func (s *AccountTestService) testGrokImageGeneration(c *gin.Context, ctx context.Context, account *Account, authToken, modelID, prompt, imageDataURL string) error {
@@ -2116,6 +2166,9 @@ func (s *AccountTestService) testOpenAIChatCompletionsConnection(
 	c.Writer.Flush()
 
 	payload := createOpenAIChatCompletionsTestPayload(testModelID, prompt)
+	if isScheduledAccountTest(ctx) {
+		payload = createScheduledOpenAIChatCompletionsTestPayload(testModelID)
+	}
 	payloadBytes, _ := json.Marshal(payload)
 
 	s.sendEvent(c, TestEvent{Type: "test_start", Model: testModelID})
@@ -2783,6 +2836,29 @@ func createOpenAITestPayload(modelID string, isOAuth bool) map[string]any {
 	return payload
 }
 
+func createScheduledOpenAITestPayload(modelID string, isOAuth bool) map[string]any {
+	payload := map[string]any{
+		"model": modelID,
+		"input": []map[string]any{
+			{
+				"role": "user",
+				"content": []map[string]any{
+					{
+						"type": "input_text",
+						"text": scheduledAccountTestPrompt,
+					},
+				},
+			},
+		},
+		"max_output_tokens": scheduledOpenAIMaxOutputTokens,
+		"stream":            true,
+	}
+	if isOAuth {
+		payload["store"] = false
+	}
+	return payload
+}
+
 func createOpenAIChatCompletionsTestPayload(modelID string, prompt string) map[string]any {
 	testPrompt := strings.TrimSpace(prompt)
 	if testPrompt == "" {
@@ -2798,6 +2874,20 @@ func createOpenAIChatCompletionsTestPayload(modelID string, prompt string) map[s
 			},
 		},
 		"stream": true,
+	}
+}
+
+func createScheduledOpenAIChatCompletionsTestPayload(modelID string) map[string]any {
+	return map[string]any{
+		"model": modelID,
+		"messages": []map[string]any{
+			{
+				"role":    "user",
+				"content": scheduledAccountTestPrompt,
+			},
+		},
+		"max_tokens": scheduledOpenAIMaxOutputTokens,
+		"stream":     true,
 	}
 }
 
@@ -2932,7 +3022,7 @@ func (s *AccountTestService) processOpenAIChatCompletionsStream(c *gin.Context, 
 }
 
 // processOpenAIStream processes the SSE stream from OpenAI Responses API
-func (s *AccountTestService) processOpenAIStream(c *gin.Context, body io.Reader) error {
+func (s *AccountTestService) processOpenAIStream(c *gin.Context, account *Account, body io.Reader) error {
 	reader := bufio.NewReader(body)
 	seenCompleted := false
 
@@ -2988,6 +3078,7 @@ func (s *AccountTestService) processOpenAIStream(c *gin.Context, body io.Reader)
 					}
 				}
 			}
+			errorMsg = normalizeOpenAIAccountCapacityMessage([]byte(jsonStr), errorMsg)
 			return s.sendErrorAndEnd(c, errorMsg)
 		case "error":
 			errorMsg := "Unknown error"
@@ -2996,6 +3087,7 @@ func (s *AccountTestService) processOpenAIStream(c *gin.Context, body io.Reader)
 					errorMsg = msg
 				}
 			}
+			errorMsg = normalizeOpenAIAccountCapacityMessage([]byte(jsonStr), errorMsg)
 			return s.sendErrorAndEnd(c, errorMsg)
 		}
 	}
@@ -3276,6 +3368,7 @@ func (s *AccountTestService) sendErrorAndEnd(c *gin.Context, errorMsg string) er
 // capturing SSE output via httptest.NewRecorder, then parses the result.
 func (s *AccountTestService) RunTestBackground(ctx context.Context, accountID int64, modelID string) (*ScheduledTestResult, error) {
 	startedAt := time.Now()
+	ctx = context.WithValue(ctx, scheduledAccountTestContextKey{}, true)
 
 	w := httptest.NewRecorder()
 	ginCtx, _ := gin.CreateTestContext(w)

@@ -905,6 +905,8 @@ export default {
       thresholdHint: 'Leave empty to use system default',
       thresholdPlaceholder: 'Enter amount',
       systemDefault: 'System Default',
+      recipientEmail: 'Notification Email',
+      registrationEmailHint: 'Low-balance alerts are sent directly to your registration email.',
       extraEmails: 'Notification Emails',
       extraEmailsHint: 'You must add and verify an email address to receive low balance alerts',
       primaryEmail: 'Primary',

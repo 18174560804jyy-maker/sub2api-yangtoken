@@ -15,7 +15,11 @@ import (
 // --- 模型定价 ---
 
 func (r *channelRepository) ListModelPricing(ctx context.Context, channelID int64) ([]service.ChannelModelPricing, error) {
-	rows, err := r.db.QueryContext(ctx,
+	return listModelPricingExec(ctx, r.db, channelID)
+}
+
+func listModelPricingExec(ctx context.Context, exec dbExec, channelID int64) ([]service.ChannelModelPricing, error) {
+	rows, err := exec.QueryContext(ctx,
 		`SELECT id, channel_id, platform, models, billing_mode, input_price, output_price, cache_write_price, cache_write_1h_price, cache_read_price, fast_multiplier, flex_multiplier, reasoning_effort_multipliers, image_input_price, image_output_price, per_request_price, time_pricing, created_at, updated_at
 		 FROM channel_model_pricing WHERE channel_id = $1 ORDER BY id`, channelID,
 	)
@@ -30,7 +34,7 @@ func (r *channelRepository) ListModelPricing(ctx context.Context, channelID int6
 	}
 
 	if len(pricingIDs) > 0 {
-		intervalMap, err := r.batchLoadIntervals(ctx, pricingIDs)
+		intervalMap, err := loadIntervalsExec(ctx, exec, pricingIDs)
 		if err != nil {
 			return nil, err
 		}
@@ -138,7 +142,11 @@ func (r *channelRepository) batchLoadModelPricing(ctx context.Context, channelID
 
 // batchLoadIntervals 批量加载多个定价条目的区间
 func (r *channelRepository) batchLoadIntervals(ctx context.Context, pricingIDs []int64) (map[int64][]service.PricingInterval, error) {
-	rows, err := r.db.QueryContext(ctx,
+	return loadIntervalsExec(ctx, r.db, pricingIDs)
+}
+
+func loadIntervalsExec(ctx context.Context, exec dbExec, pricingIDs []int64) (map[int64][]service.PricingInterval, error) {
+	rows, err := exec.QueryContext(ctx,
 		`SELECT id, pricing_id, min_tokens, max_tokens, tier_label,
 		        input_price, output_price, cache_write_price, cache_write_1h_price, cache_read_price,
 		        input_multiplier, output_multiplier, cache_write_multiplier, cache_read_multiplier,

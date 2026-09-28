@@ -1247,8 +1247,8 @@ func TestProxyOpenAIWSHTTPBridgeTurnStagesMetadataAndRelaysKeepaliveBeforeCapaci
 	require.Nil(t, result)
 	var failoverErr *UpstreamFailoverError
 	require.ErrorAs(t, err, &failoverErr)
-	require.True(t, failoverErr.RetryableOnSameAccount)
-	require.True(t, failoverErr.RequestScopedTransient)
+	require.False(t, failoverErr.RetryableOnSameAccount)
+	require.False(t, failoverErr.RequestScopedTransient)
 	require.Len(t, writes, 1)
 	require.JSONEq(t, `{"type":"keepalive"}`, string(writes[0]))
 }

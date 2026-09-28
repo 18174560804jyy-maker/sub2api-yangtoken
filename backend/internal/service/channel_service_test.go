@@ -1159,6 +1159,26 @@ func TestIsModelRestricted_CaseInsensitive(t *testing.T) {
 	require.False(t, restricted)
 }
 
+func TestFilterAllowedModels_AddsExplicitPricingAndOmitsRestricted(t *testing.T) {
+	ch := Channel{
+		ID:             1,
+		Status:         StatusActive,
+		GroupIDs:       []int64{10},
+		RestrictModels: true,
+		ModelPricing: []ChannelModelPricing{
+			{Platform: "openai", Models: []string{"enabled-model", "PREFIX-*"}},
+			{Platform: "anthropic", Models: []string{"wrong-platform"}},
+		},
+	}
+	repo := makeStandardRepo(ch, map[int64]string{10: "openai"})
+	svc := newTestChannelService(repo)
+
+	models := svc.FilterAllowedModels(context.Background(), 10, []string{"prefix-live", "disabled-model"})
+	require.Equal(t, []string{"enabled-model", "prefix-live"}, models)
+	require.True(t, svc.HasModelRestriction(context.Background(), 10))
+	require.False(t, svc.HasModelRestriction(context.Background(), 11))
+}
+
 // --- 4.5 ResolveChannelMappingAndRestrict ---
 // 注意：模型限制检查已移至调度阶段（GatewayService.checkChannelPricingRestriction），
 // ResolveChannelMappingAndRestrict 仅做映射，restricted 始终为 false。

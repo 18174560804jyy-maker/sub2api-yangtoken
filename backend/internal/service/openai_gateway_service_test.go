@@ -1915,7 +1915,7 @@ func TestOpenAIStreamingResponseFailedBeforeOutputCapacityErrorReturnsFailover(t
 	var failoverErr *UpstreamFailoverError
 	require.ErrorAs(t, err, &failoverErr)
 	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
-	require.True(t, failoverErr.RetryableOnSameAccount)
+	require.False(t, failoverErr.RetryableOnSameAccount)
 	require.Contains(t, string(failoverErr.ResponseBody), "Selected model is at capacity")
 	require.False(t, c.Writer.Written())
 	require.Empty(t, rec.Body.String())
@@ -1955,12 +1955,49 @@ func TestOpenAIStreamingResponseFailedBeforeOutputServerOverloadedCodeReturnsFai
 	require.ErrorAs(t, err, &failoverErr)
 	require.Equal(t, http.StatusServiceUnavailable, failoverErr.StatusCode)
 	require.Contains(t, string(failoverErr.ResponseBody), "Please retry later")
-	// 容量降载是请求级信号：非池模式账号也要先在同账号重试，且不得据此临时封禁账号。
-	// 否则单个被降载的请求会把整池账号逐个消耗掉，而降载因素在每个账号上都相同。
-	require.True(t, failoverErr.RetryableOnSameAccount)
-	require.True(t, failoverErr.RequestScopedTransient)
+	require.False(t, failoverErr.RetryableOnSameAccount)
+	require.False(t, failoverErr.RequestScopedTransient)
 	require.False(t, c.Writer.Written())
 	require.Empty(t, rec.Body.String())
+}
+
+func TestOpenAIStreamingResponseFailedAfterOutputServerOverloadedKeepsAccountSchedulable(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	repo := &capacityShedAccountRepoStub{}
+	svc := &OpenAIGatewayService{
+		accountRepo: repo,
+		cfg: &config.Config{Gateway: config.GatewayConfig{
+			StreamDataIntervalTimeout: 0,
+			StreamKeepaliveInterval:   0,
+			MaxLineSize:               defaultMaxLineSize,
+		}},
+	}
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodPost, "/", nil)
+	resp := &http.Response{
+		StatusCode: http.StatusOK,
+		Body: io.NopCloser(strings.NewReader(strings.Join([]string{
+			"event: response.created",
+			`data: {"type":"response.created","response":{"id":"resp_1"}}`,
+			"",
+			"event: response.output_text.delta",
+			`data: {"type":"response.output_text.delta","delta":"partial"}`,
+			"",
+			"event: response.failed",
+			`data: {"type":"response.failed","response":{"id":"resp_1","error":{"code":"server_is_overloaded","message":"Our servers are currently overloaded. Please try again later."}}}`,
+			"",
+		}, "\n"))),
+		Header: http.Header{"X-Request-Id": []string{"rid-overloaded-after-output"}},
+	}
+	account := &Account{ID: 199, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Name: "GPT-PLUS(biu)"}
+
+	_, err := svc.handleStreamingResponse(c.Request.Context(), resp, c, account, time.Now(), "gpt-5.6-sol", "gpt-5.6-sol")
+	require.Error(t, err)
+	require.NotErrorAs(t, err, new(*UpstreamFailoverError))
+	require.Zero(t, repo.tempUnschedCalls)
+	require.Contains(t, rec.Body.String(), "partial")
+	require.False(t, svc.isOpenAIAccountRequestRuntimeBlocked(account, "gpt-5.5"))
 }
 
 func TestOpenAIStreamingResponseFailedBeforeOutputRateLimitUsesPoolRetryPolicy(t *testing.T) {

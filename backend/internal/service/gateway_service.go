@@ -1484,6 +1484,17 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 	return cloneStringSlice(models)
 }
 
+func (s *GatewayService) FilterModelsByChannelRestriction(ctx context.Context, groupID *int64, models []string) []string {
+	if s == nil || s.channelService == nil || groupID == nil {
+		return cloneStringSlice(models)
+	}
+	return s.channelService.FilterAllowedModels(ctx, *groupID, models)
+}
+
+func (s *GatewayService) HasChannelModelRestriction(ctx context.Context, groupID *int64) bool {
+	return s != nil && s.channelService != nil && groupID != nil && s.channelService.HasModelRestriction(ctx, *groupID)
+}
+
 func (s *GatewayService) resolveCompositeModelOwnership(ctx context.Context, groupID int64, model string) (CompositeModelOwnership, error) {
 	model = strings.TrimSpace(model)
 	if s == nil || s.accountRepo == nil || groupID <= 0 || model == "" {

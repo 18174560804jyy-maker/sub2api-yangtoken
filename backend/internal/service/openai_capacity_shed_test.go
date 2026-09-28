@@ -22,10 +22,16 @@ type capacityShedAccountRepoStub struct {
 	AccountRepository // 嵌入接口，未实现的方法会 panic（不应被调用）
 
 	tempUnschedCalls int
+	accountID        int64
+	until            time.Time
+	reason           string
 }
 
-func (r *capacityShedAccountRepoStub) SetTempUnschedulable(_ context.Context, _ int64, _ time.Time, _ string) error {
+func (r *capacityShedAccountRepoStub) SetTempUnschedulable(_ context.Context, accountID int64, until time.Time, reason string) error {
 	r.tempUnschedCalls++
+	r.accountID = accountID
+	r.until = until
+	r.reason = reason
 	return nil
 }
 
@@ -61,14 +67,24 @@ func TestTempUnscheduleRetryableErrorSkipsRequestScopedTransient(t *testing.T) {
 	})
 }
 
-// 非池模式账号同样要先在同账号重试：换号不改变降载因素。
-func TestStreamFailedEventCapacityShedRetriesOnSameAccount(t *testing.T) {
+func TestStreamFailedEventCapacityPolicy(t *testing.T) {
 	nonPool := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
 
-	for _, code := range []string{"server_is_overloaded", "slow_down"} {
-		payload := []byte(`{"type":"response.failed","response":{"error":{"code":"` + code + `"}}}`)
-		require.True(t, isOpenAIUpstreamCapacityShedEvent(payload), code)
-		require.True(t, openAIStreamFailedEventRetryableOnSameAccount(nonPool, payload, "overloaded"), code)
+	overloaded := []byte(`{"type":"response.failed","response":{"error":{"code":"server_is_overloaded"}}}`)
+	require.True(t, isOpenAIAccountCapacityError(overloaded, "Please retry later"))
+	require.False(t, openAIStreamFailedEventRetryableOnSameAccount(nonPool, overloaded, "Please retry later"))
+
+	slowDown := []byte(`{"type":"response.failed","response":{"error":{"code":"slow_down"}}}`)
+	require.True(t, isOpenAIUpstreamCapacityShedEvent(slowDown))
+	require.False(t, isOpenAIAccountCapacityError(slowDown, "Please retry later"))
+	require.True(t, openAIStreamFailedEventRetryableOnSameAccount(nonPool, slowDown, "Please retry later"))
+
+	for _, message := range []string{
+		"Our servers are currently overloaded. Please try again later.",
+		"Selected model is at capacity. Please try a different model.",
+	} {
+		require.True(t, isOpenAIAccountCapacityError(nil, message), message)
+		require.False(t, openAIStreamFailedEventRetryableOnSameAccount(nonPool, nil, message), message)
 	}
 
 	// 非降载的 failed 事件在非池模式下仍不做同账号重试，避免放大改动面。
@@ -200,8 +216,8 @@ func TestOpenAIStreamMetadataAndKeepaliveBeforeOverloadFailOver(t *testing.T) {
 			require.Error(t, err)
 			var failoverErr *UpstreamFailoverError
 			require.ErrorAs(t, err, &failoverErr)
-			require.True(t, failoverErr.RetryableOnSameAccount)
-			require.True(t, failoverErr.RequestScopedTransient)
+			require.False(t, failoverErr.RetryableOnSameAccount)
+			require.False(t, failoverErr.RequestScopedTransient)
 			require.Equal(t, http.StatusServiceUnavailable, failoverErr.ClientStatusCode)
 			require.Contains(t, failoverErr.ClientMessage, "servers are currently overloaded")
 			require.False(t, c.Writer.Written())
@@ -252,15 +268,16 @@ func TestOpenAIStreamKeepaliveOnlyFailureDoesNotRecordFirstToken(t *testing.T) {
 			}
 			var failoverErr *UpstreamFailoverError
 			require.ErrorAs(t, err, &failoverErr)
-			require.True(t, failoverErr.RetryableOnSameAccount)
-			require.True(t, failoverErr.RequestScopedTransient)
+			require.False(t, failoverErr.RetryableOnSameAccount)
+			require.False(t, failoverErr.RequestScopedTransient)
 			require.Empty(t, rec.Body.String())
 		})
 	}
 }
 
 // 回归用例（真实上游降载序列）：created → in_progress → error 帧 → response.failed。
-// 期望仍然走 pre-output failover（同账号重试 + 请求级瞬时标记），且不向客户端写出任何字节。
+// 期望仍然走 pre-output failover；羊TOKEN会冷却容量不足的整账号并直接换号，
+// 因此不在原账号重试，也不标记为请求级瞬时错误。
 func TestOpenAIStreamCapacityShedErrorFramePrecedingFailedStillFailsOver(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	cfg := &config.Config{
@@ -295,8 +312,8 @@ func TestOpenAIStreamCapacityShedErrorFramePrecedingFailedStillFailsOver(t *test
 	require.Error(t, err)
 	var failoverErr *UpstreamFailoverError
 	require.ErrorAs(t, err, &failoverErr)
-	require.True(t, failoverErr.RetryableOnSameAccount)
-	require.True(t, failoverErr.RequestScopedTransient)
+	require.False(t, failoverErr.RetryableOnSameAccount)
+	require.False(t, failoverErr.RequestScopedTransient)
 	require.False(t, c.Writer.Written())
 	require.Empty(t, rec.Body.String())
 }
@@ -470,6 +487,39 @@ func TestSanitizeOpenAICapacityShedErrorCodeForClient(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestOpenAIAccountCapacityErrorFromGatewayDoesNotChangeScheduling(t *testing.T) {
+	repo := &capacityShedAccountRepoStub{}
+	svc := &OpenAIGatewayService{accountRepo: repo}
+	account := &Account{ID: 199, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Name: "GPT-PLUS(biu)"}
+	payload := []byte(`{"type":"response.failed","response":{"error":{"code":"server_is_overloaded","message":"Please retry later."}}}`)
+
+	svc.observeOpenAIAccountCapacity(account, payload, "Please retry later.")
+
+	require.Zero(t, repo.tempUnschedCalls)
+	require.False(t, svc.isOpenAIAccountRequestRuntimeBlocked(account, "gpt-5.6-sol"))
+	require.False(t, svc.isOpenAIAccountRequestRuntimeBlocked(account, "gpt-5.5"))
+}
+
+func TestOpenAIAccountCapacityCooldownDoesNotApplyToSlowDownOrGrok(t *testing.T) {
+	repo := &capacityShedAccountRepoStub{}
+	svc := &OpenAIGatewayService{accountRepo: repo}
+	slowDown := []byte(`{"type":"response.failed","response":{"error":{"code":"slow_down"}}}`)
+	svc.observeOpenAIAccountCapacity(&Account{ID: 1, Platform: PlatformOpenAI}, slowDown, "Please retry later")
+	svc.observeOpenAIAccountCapacity(&Account{ID: 2, Platform: PlatformGrok}, nil, "Our servers are currently overloaded")
+	require.Zero(t, repo.tempUnschedCalls)
+}
+
+func TestConsecutiveOpenAIAccountCapacityFailuresRequireTwoAdjacentFailures(t *testing.T) {
+	capacity := &ScheduledTestResult{Status: "failed", ErrorMessage: "Our servers are currently overloaded. Please try again later."}
+	success := &ScheduledTestResult{Status: "success"}
+	otherFailure := &ScheduledTestResult{Status: "failed", ErrorMessage: "API returned 429"}
+
+	require.False(t, hasConsecutiveOpenAIAccountCapacityFailures([]*ScheduledTestResult{capacity}))
+	require.False(t, hasConsecutiveOpenAIAccountCapacityFailures([]*ScheduledTestResult{capacity, success}))
+	require.False(t, hasConsecutiveOpenAIAccountCapacityFailures([]*ScheduledTestResult{capacity, otherFailure}))
+	require.True(t, hasConsecutiveOpenAIAccountCapacityFailures([]*ScheduledTestResult{capacity, capacity}))
 }
 
 // 出站身份的版本声明只能有一个来源：UA 的版本段、version 头、探针版本三处必须同源，

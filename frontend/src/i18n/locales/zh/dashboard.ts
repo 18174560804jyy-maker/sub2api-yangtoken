@@ -909,6 +909,8 @@ export default {
       thresholdHint: '留空使用系统默认值',
       thresholdPlaceholder: '输入金额',
       systemDefault: '系统默认值',
+      recipientEmail: '提醒邮箱',
+      registrationEmailHint: '余额低于阈值时，提醒将直接发送到您的注册邮箱。',
       extraEmails: '通知邮箱',
       extraEmailsHint: '必须添加并验证邮箱后，余额不足时才能收到提醒邮件',
       primaryEmail: '主邮箱',

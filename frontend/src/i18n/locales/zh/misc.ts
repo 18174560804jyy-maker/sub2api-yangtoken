@@ -85,6 +85,22 @@ export default {
     copyCodeFailed: '失败'
   },
 
+  pricing: {
+    title: '国模定价',
+    description: '中国大模型 · 人民币 / 百万 Token',
+    search: '搜索模型或厂商',
+    provider: '厂商',
+    model: '模型',
+    providerColumn: '供应商',
+    official: '官网价格',
+    ourSelling: '本站售价',
+    ourMultiple: '本站 / 官网',
+    updatedAt: '价格更新于 {time}',
+    unitHint: '价格单位：人民币 / 百万 Token；倍率 = 售价 ÷ 官网价格。',
+    empty: '暂无匹配的模型',
+    loadFailed: '加载价格表失败'
+  },
+
   // Announcements Page
   announcements: {
     title: '公告',

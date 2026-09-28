@@ -1135,18 +1135,21 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 	}
 
 	if platform == service.PlatformOpenAI && apiKey != nil && apiKey.Group != nil &&
-		apiKey.Group.Platform == service.PlatformOpenAI && apiKey.Group.CodexModelsManifestConfig.Enabled {
+		apiKey.Group.Platform == service.PlatformOpenAI && apiKey.Group.CodexModelsManifestConfig.Enabled &&
+		!h.gatewayService.HasChannelModelRestriction(c.Request.Context(), groupID) {
 		h.pinnedOpenAIModels(c, apiKey.Group)
 		return
 	}
 
 	if platform == service.PlatformComposite {
 		availableModels := h.compositeAvailableModels(c.Request.Context(), groupID)
+		availableModels = h.gatewayService.FilterModelsByChannelRestriction(c.Request.Context(), groupID, availableModels)
 		if apiKey != nil && apiKey.Group != nil && apiKey.Group.ModelAllowlistEnabled() {
 			source := availableModels
 			if len(source) == 0 {
 				source = defaultModelIDsForPlatform(service.PlatformComposite)
 			}
+			source = h.gatewayService.FilterModelsByChannelRestriction(c.Request.Context(), groupID, source)
 			writeAllowlistedModelsList(c, service.PlatformComposite, apiKey.Group.ModelAllowlist.FilterForListing(source))
 			return
 		}
@@ -1154,14 +1157,17 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 			writeModelsList(c, service.PlatformComposite, availableModels)
 			return
 		}
-		writeModelsList(c, service.PlatformComposite, defaultModelIDsForPlatform(service.PlatformComposite))
+		fallback := h.gatewayService.FilterModelsByChannelRestriction(c.Request.Context(), groupID, defaultModelIDsForPlatform(service.PlatformComposite))
+		writeModelsList(c, service.PlatformComposite, fallback)
 		return
 	}
 
 	// Get available models from account configurations for the selected group platform.
 	availableModels := h.gatewayService.GetAvailableModels(c.Request.Context(), groupID, platform)
+	availableModels = h.gatewayService.FilterModelsByChannelRestriction(c.Request.Context(), groupID, availableModels)
 	if apiKey != nil && apiKey.Group != nil && apiKey.Group.ModelAllowlistEnabled() {
 		source := modelListingSource(platform, availableModels, defaultModelIDsForPlatform(platform))
+		source = h.gatewayService.FilterModelsByChannelRestriction(c.Request.Context(), groupID, source)
 		writeAllowlistedModelsList(c, platform, apiKey.Group.ModelAllowlist.FilterForListing(source))
 		return
 	}
@@ -1171,22 +1177,10 @@ func (h *GatewayHandler) Models(c *gin.Context) {
 		return
 	}
 
-	// Fallback to default models
-	if platform == service.PlatformOpenAI {
-		writeModelsListResponse(c, openai.DefaultModels)
-		return
-	}
-
-	if platform == service.PlatformGemini {
-		writeModelsListResponse(c, geminicli.DefaultModels)
-		return
-	}
-	if platform == service.PlatformGrok {
-		writeGrokModelsList(c, xai.DefaultModelIDs())
-		return
-	}
-
-	writeModelsListResponse(c, claude.DefaultModels)
+	// Apply channel restrictions to fallback IDs too; otherwise a disabled model
+	// would reappear whenever account mappings are absent.
+	fallback := h.gatewayService.FilterModelsByChannelRestriction(c.Request.Context(), groupID, defaultModelIDsForPlatform(platform))
+	writeModelsList(c, platform, fallback)
 }
 
 // CodexModels returns the effective group model list using the manifest shape
@@ -1237,7 +1231,9 @@ func (h *GatewayHandler) codexModelIDsForGroup(ctx context.Context, group *servi
 	}
 	if platform == service.PlatformComposite {
 		availableModels := h.compositeAvailableModels(ctx, groupID)
+		availableModels = h.gatewayService.FilterModelsByChannelRestriction(ctx, groupID, availableModels)
 		fallbackModels := defaultCodexModelIDsForPlatform(service.PlatformComposite)
+		fallbackModels = h.gatewayService.FilterModelsByChannelRestriction(ctx, groupID, fallbackModels)
 		if group.ModelAllowlistEnabled() {
 			source := availableModels
 			if len(source) == 0 {
@@ -1252,7 +1248,9 @@ func (h *GatewayHandler) codexModelIDsForGroup(ctx context.Context, group *servi
 	}
 
 	availableModels := h.gatewayService.GetAvailableModels(ctx, groupID, platform)
+	availableModels = h.gatewayService.FilterModelsByChannelRestriction(ctx, groupID, availableModels)
 	fallbackModels := defaultCodexModelIDsForPlatform(platform)
+	fallbackModels = h.gatewayService.FilterModelsByChannelRestriction(ctx, groupID, fallbackModels)
 	if group.ModelAllowlistEnabled() {
 		return group.ModelAllowlist.FilterForListing(modelListingSource(platform, availableModels, fallbackModels))
 	}

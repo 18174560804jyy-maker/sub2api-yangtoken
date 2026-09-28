@@ -94,6 +94,7 @@ const (
 	openAI403CooldownMinutesDefault = 10
 	openAI403DisableThreshold       = 3
 	openAI403CounterWindowMinutes   = 180
+	apiKey403CooldownMinutesDefault = 10
 )
 
 // NewRateLimitService 创建RateLimitService实例
@@ -978,9 +979,8 @@ func buildForbiddenErrorMessage(prefix string, upstreamMsg string, responseBody 
 	return prefix + fallback
 }
 
-// handle403 处理 403 Forbidden 错误
-// Antigravity 平台区分 validation/violation/generic 三种类型，均 SetError 永久禁用；
-// 其他平台保持原有 SetError 行为。
+// handle403 处理 403 Forbidden 错误。
+// 中转 API Key 的 403 常被用来表示短暂计费或权限异常，不能据此永久关闭调度。
 func (s *RateLimitService) handle403(ctx context.Context, account *Account, upstreamMsg string, responseBody []byte) (shouldDisable bool) {
 	if account.Platform == PlatformAntigravity {
 		return s.handleAntigravity403(ctx, account, upstreamMsg, responseBody)
@@ -1006,7 +1006,22 @@ func (s *RateLimitService) handle403(ctx context.Context, account *Account, upst
 	if account.Platform == PlatformOpenAI || IsCNProvider(account.Platform) || account.IsOpenCodeGo() {
 		return s.handleOpenAI403(ctx, account, upstreamMsg, responseBody)
 	}
-	// 非 Antigravity 平台：保持原有行为
+	if account.Type == AccountTypeAPIKey {
+		msg := buildForbiddenErrorMessage(
+			"API key 403 temporary cooldown:",
+			upstreamMsg,
+			responseBody,
+			"upstream temporarily rejected the request",
+		)
+		until := time.Now().Add(time.Duration(apiKey403CooldownMinutesDefault) * time.Minute)
+		s.notifyAccountSchedulingBlocked(account, until, "api_key_403_temp")
+		if err := s.accountRepo.SetTempUnschedulable(ctx, account.ID, until, msg); err != nil {
+			slog.Warn("api_key_403_set_temp_unschedulable_failed", "account_id", account.ID, "error", err)
+		}
+		slog.Warn("api_key_403_temp_unschedulable", "account_id", account.ID, "until", until, "error", msg)
+		return true
+	}
+
 	msg := buildForbiddenErrorMessage(
 		"Access forbidden (403):",
 		upstreamMsg,
@@ -2142,7 +2157,11 @@ func (s *RateLimitService) RecoverAccountState(ctx context.Context, accountID in
 	if err != nil {
 		return nil, err
 	}
+	return s.recoverAccountState(ctx, account, options)
+}
 
+func (s *RateLimitService) recoverAccountState(ctx context.Context, account *Account, options AccountRecoveryOptions) (*SuccessfulTestRecoveryResult, error) {
+	accountID := account.ID
 	result := &SuccessfulTestRecoveryResult{}
 	if account.Status == StatusError {
 		if err := s.accountRepo.ClearError(ctx, accountID); err != nil {
@@ -2175,7 +2194,14 @@ func (s *RateLimitService) RecoverAccountState(ctx context.Context, accountID in
 // RecoverAccountAfterSuccessfulTest 将一次成功测试视为正常请求，
 // 按需恢复 error / rate-limit / overload / temp-unsched / model-rate-limit 等运行时状态。
 func (s *RateLimitService) RecoverAccountAfterSuccessfulTest(ctx context.Context, accountID int64) (*SuccessfulTestRecoveryResult, error) {
-	return s.RecoverAccountState(ctx, accountID, AccountRecoveryOptions{})
+	account, err := s.accountRepo.GetByID(ctx, accountID)
+	if err != nil {
+		return nil, err
+	}
+	if isOpenAIAccountCapacityCooldownActive(account, time.Now()) {
+		return &SuccessfulTestRecoveryResult{}, nil
+	}
+	return s.recoverAccountState(ctx, account, AccountRecoveryOptions{})
 }
 
 func (s *RateLimitService) ClearTempUnschedulable(ctx context.Context, accountID int64) error {

@@ -167,6 +167,17 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/pricing',
+    name: 'PublicPricing',
+    component: () => import('@/views/user/PublicPricingView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: false,
+      title: 'Pricing',
+      titleKey: 'pricing.title'
+    }
+  },
+  {
     path: '/legal/:documentId',
     name: 'LegalDocument',
     component: () => import('@/views/public/LegalDocumentView.vue'),
@@ -386,6 +397,10 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
+    path: '/custom/yangtoken-pricing',
+    redirect: '/pricing'
+  },
+  {
     path: '/custom/:id',
     name: 'CustomPage',
     component: () => import('@/views/user/CustomPageView.vue'),
@@ -488,6 +503,18 @@ const routes: RouteRecordRaw[] = [
       title: 'Channel Monitor',
       titleKey: 'admin.channelMonitor.title',
       descriptionKey: 'admin.channelMonitor.description'
+    }
+  },
+  {
+    path: '/admin/channels/downstream-pricing',
+    name: 'AdminDownstreamPricing',
+    component: () => import('@/views/admin/DownstreamPricingView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Downstream Pricing',
+      titleKey: 'admin.channels.downstreamPricing.title',
+      descriptionKey: 'admin.channels.downstreamPricing.description'
     }
   },
   {

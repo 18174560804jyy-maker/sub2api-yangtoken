@@ -128,6 +128,8 @@ func (s *ScheduledTestRunnerService) runOnePlan(ctx context.Context, plan *Sched
 
 	if err := s.scheduledSvc.SaveResult(ctx, plan.ID, plan.MaxResults, result); err != nil {
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d SaveResult error: %v", plan.ID, err)
+	} else if result.Status == "failed" {
+		s.tryApplyConsecutiveOpenAICapacityCooldown(ctx, plan)
 	}
 
 	// Auto-recover account if test succeeded and auto_recover is enabled.
@@ -144,6 +146,33 @@ func (s *ScheduledTestRunnerService) runOnePlan(ctx context.Context, plan *Sched
 	if err := s.planRepo.UpdateAfterRun(ctx, plan.ID, time.Now(), nextRun); err != nil {
 		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d UpdateAfterRun error: %v", plan.ID, err)
 	}
+}
+
+func hasConsecutiveOpenAIAccountCapacityFailures(results []*ScheduledTestResult) bool {
+	if len(results) < 2 {
+		return false
+	}
+	for _, result := range results[:2] {
+		if result == nil || result.Status != "failed" || !isOpenAIAccountCapacityError(nil, result.ErrorMessage) {
+			return false
+		}
+	}
+	return true
+}
+
+func (s *ScheduledTestRunnerService) tryApplyConsecutiveOpenAICapacityCooldown(ctx context.Context, plan *ScheduledTestPlan) {
+	if s == nil || s.scheduledSvc == nil || s.accountTestSvc == nil || plan == nil {
+		return
+	}
+	results, err := s.scheduledSvc.ListResults(ctx, plan.ID, 2)
+	if err != nil {
+		logger.LegacyPrintf("service.scheduled_test_runner", "[ScheduledTestRunner] plan=%d capacity history load failed: %v", plan.ID, err)
+		return
+	}
+	if !hasConsecutiveOpenAIAccountCapacityFailures(results) {
+		return
+	}
+	s.accountTestSvc.tempUnscheduleOpenAIAccountCapacityByID(ctx, plan.AccountID, results[0].ErrorMessage)
 }
 
 // tryRecoverAccount attempts to recover an account from recoverable runtime state.

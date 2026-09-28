@@ -2,11 +2,14 @@ package service
 
 import (
 	"fmt"
+	"regexp"
 	"strings"
 
 	pluginv1 "github.com/Wei-Shaw/sub2api/pkg/pluginapi/v1"
 	"golang.org/x/mod/semver"
 )
+
+var legacyCustomVersionPattern = regexp.MustCompile(`^v?(\d+\.\d+\.\d+)\.(\d+)-([0-9A-Za-z.-]+)$`)
 
 type PluginHostInfo struct {
 	Version   string
@@ -55,6 +58,11 @@ func normalizeSemver(version string) string {
 	v := strings.TrimSpace(version)
 	if v == "" {
 		return ""
+	}
+	// Older custom builds used X.Y.Z.N-name. Preserve the public version while
+	// comparing it as X.Y.Z+name.N, which is valid SemVer build metadata.
+	if matches := legacyCustomVersionPattern.FindStringSubmatch(v); matches != nil {
+		v = matches[1] + "+" + matches[3] + "." + matches[2]
 	}
 	if !strings.HasPrefix(v, "v") {
 		v = "v" + v
