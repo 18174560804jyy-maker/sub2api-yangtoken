@@ -35,7 +35,8 @@ func TestSchedulerMetadataAccountKeepsHostedVideoCapability(t *testing.T) {
 	require.True(t, metadata.SupportsOpenAIEndpointCapability(service.OpenAIEndpointCapabilityHostedVideo))
 	require.NotContains(t, metadata.Credentials, "refresh_token")
 	account.Credentials["openai_capabilities"] = []any{"chat_completions"}
-	require.False(t, buildSchedulerMetadataAccount(account).SupportsOpenAIEndpointCapability(service.OpenAIEndpointCapabilityHostedVideo))
+	metadata = buildSchedulerMetadataAccount(account)
+	require.False(t, metadata.SupportsOpenAIEndpointCapability(service.OpenAIEndpointCapabilityHostedVideo))
 }
 
 func TestSchedulerMetadataAccountKeepsOpenAISubscriptionIdentity(t *testing.T) {
