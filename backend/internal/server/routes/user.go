@@ -78,6 +78,7 @@ func RegisterUserRoutes(
 		// API Key管理
 		keys := authenticated.Group("/keys")
 		{
+			keys.POST("/ensure-media", h.APIKey.EnsureCanvasMedia)
 			keys.GET("", h.APIKey.List)
 			keys.GET("/:id", h.APIKey.GetByID)
 			keys.POST("", h.APIKey.Create)
