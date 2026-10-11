@@ -54,7 +54,7 @@ func (h *OpenAIGatewayHandler) GrokVideoContent(c *gin.Context) {
 func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.GrokMediaEndpoint, requestID string) {
 	platform := service.PlatformGrok
 	noAccountCode, noAccountMessage := "grok_media_no_eligible_account", "No eligible Grok media accounts"
-	if endpoint.IsSeedance() {
+	if endpoint.IsSeedance() || endpoint.IsHostedVideo() {
 		platform = service.PlatformOpenAI
 		noAccountCode, noAccountMessage = "seedance_no_eligible_account", "No eligible Seedance accounts"
 	}
@@ -105,6 +105,22 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 
 	contentType := c.GetHeader("Content-Type")
 	requestInfo := service.ParseGrokMediaRequest(contentType, body)
+	if endpoint == service.HostedVideoCreate {
+		body, err = service.CanonicalHostedVideoBody(body)
+		if err != nil {
+			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+			return
+		}
+		requestInfo, err = service.ParseHostedVideoRequest(body)
+		if err != nil {
+			h.errorResponse(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+			return
+		}
+		if _, err = h.gatewayService.QuoteHostedVideo(c.Request.Context(), apiKey, requestInfo); err != nil {
+			h.errorResponse(c, http.StatusForbidden, "pricing_error", err.Error())
+			return
+		}
+	}
 	if endpoint == service.SeedanceEndpointCreate {
 		requestInfo, err = service.ParseSeedanceRequest(body)
 		if err != nil {
@@ -163,7 +179,11 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		defer userReleaseFunc()
 	}
 
-	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
+	var billingEligibilityErr error
+	if !endpoint.IsHostedVideo() || endpoint.IsGenerationRequest() {
+		billingEligibilityErr = h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey))
+	}
+	if err := billingEligibilityErr; err != nil {
 		reqLog.Info("grok_media.billing_eligibility_check_failed", zap.Error(err))
 		status, code, message, retryAfter := billingErrorDetails(err)
 		if retryAfter > 0 {
@@ -322,7 +342,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		)
 
 		account := selection.Account
-		if endpoint.IsGenerationRequest() && !endpoint.IsSeedance() {
+		if endpoint.IsGenerationRequest() && !endpoint.IsSeedance() && !endpoint.IsHostedVideo() {
 			eligible, eligibilityReason, eligibilityErr := h.ensureGrokMediaAccountEligibility(requestCtx, account)
 			if !eligible {
 				releaseAccount()
@@ -373,6 +393,9 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		writerSizeBeforeForward := c.Writer.Size()
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer releaseAccount()
+			if endpoint.IsHostedVideo() {
+				return h.gatewayService.ForwardHostedVideo(requestCtx, c, account, endpoint, requestID, body, apiKey, subject.UserID)
+			}
 			if endpoint.IsSeedance() {
 				return h.gatewayService.ForwardSeedance(requestCtx, c, account, endpoint, requestID, body)
 			}
@@ -464,7 +487,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		}
 
 		h.gatewayService.ReportOpenAIAccountScheduleResult(account, grokMediaScheduleModel(account, routingModel, result), true, nil)
-		if isGrokVideoCreateEndpoint(endpoint) && strings.TrimSpace(result.ResponseID) != "" {
+		if isGrokVideoCreateEndpoint(endpoint) && !endpoint.IsHostedVideo() && strings.TrimSpace(result.ResponseID) != "" {
 			if err := h.gatewayService.BindGrokMediaVideoRequestAccount(
 				requestCtx, apiKey.GroupID, result.ResponseID, subject.UserID, apiKey.ID, account.ID,
 			); err != nil {
@@ -506,7 +529,11 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 		}
 		// Status poll OR content download can observe official done+video.url.
 		// Both paths share the same claim key so the customer is charged once.
-		if endpoint == service.SeedanceEndpointStatus {
+		if endpoint == service.HostedVideoStatus || endpoint == service.HostedVideoContent {
+			if billResult := prepareHostedVideoCompletionBilling(requestCtx, h, apiKey, subject, requestID, result); billResult != nil {
+				recordGrokMediaUsage(c, h, reqLog, apiKey, subject, subscription, account, billResult, billResult.Model, body, requestID)
+			}
+		} else if endpoint == service.SeedanceEndpointStatus {
 			if billResult := prepareSeedanceCompletionBilling(requestCtx, h, apiKey, subject, requestID, result); billResult != nil {
 				recordGrokMediaUsage(c, h, reqLog, apiKey, subject, subscription, account, billResult, billResult.Model, body, requestID)
 			}
@@ -541,6 +568,9 @@ func (h *OpenAIGatewayHandler) ensureGrokMediaAccountEligibility(ctx context.Con
 }
 
 func grokMediaRequiredCapability(endpoint service.GrokMediaEndpoint) service.OpenAIEndpointCapability {
+	if endpoint.IsHostedVideo() {
+		return service.OpenAIEndpointCapabilityHostedVideo
+	}
 	if endpoint.IsSeedance() {
 		return service.OpenAIEndpointCapabilitySeedance
 	}
@@ -562,7 +592,7 @@ func grokMediaScheduleModel(account *service.Account, routingModel string, resul
 
 func isGrokVideoCreateEndpoint(endpoint service.GrokMediaEndpoint) bool {
 	switch endpoint {
-	case service.SeedanceEndpointCreate, service.GrokMediaEndpointVideosGenerations,
+	case service.HostedVideoCreate, service.SeedanceEndpointCreate, service.GrokMediaEndpointVideosGenerations,
 		service.GrokMediaEndpointVideosEdits,
 		service.GrokMediaEndpointVideosExtensions:
 		return true

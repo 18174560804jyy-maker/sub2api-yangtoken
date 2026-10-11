@@ -412,6 +412,10 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		usageLog.VideoCount = result.VideoCount
 		usageLog.VideoResolution = optionalTrimmedStringPtr(NormalizeVideoBillingResolutionOrDefault(result.VideoResolution))
 		videoDurationSeconds := NormalizeVideoBillingDurationSecondsOrDefault(result.VideoDurationSeconds)
+		if result.HostedVideoCost != nil {
+			videoDurationSeconds = result.VideoDurationSeconds
+			usageLog.VideoResolution = optionalTrimmedStringPtr(result.VideoResolution)
+		}
 		usageLog.VideoDurationSeconds = &videoDurationSeconds
 	}
 	if cost != nil {
@@ -572,6 +576,10 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 	pricingAt time.Time,
 ) (*CostBreakdown, error) {
 	billingModel := firstUsageBillingModel(billingModels)
+	if result != nil && result.VideoCount > 0 && result.HostedVideoCost != nil {
+		cost := *result.HostedVideoCost
+		return &cost, nil
+	}
 	if result != nil && result.WebSearchCalls > 0 {
 		// Codex alpha/search 网页搜索按次计费：上游不返回 usage/token 字段，单价只取
 		// 分组覆盖价（nil 时默认 0.01 = 官方 $10/1000 次），不参与渠道级模型定价。

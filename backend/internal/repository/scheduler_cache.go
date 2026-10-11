@@ -956,7 +956,9 @@ func filterSchedulerCredentials(credentials map[string]any) map[string]any {
 	}
 	// Candidate-list admission evaluates the account override before hydrating
 	// the full account. Dropping it silently falls back to the platform threshold.
-	keys := []string{"model_mapping", "compact_model_mapping", "api_key", "project_id", "oauth_type", "plan_type", "account_scheduling_threshold"}
+	// Endpoint admission also runs before hydration and needs the explicit
+	// capability set and upstream URL for hosted-video/API-key accounts.
+	keys := []string{"model_mapping", "compact_model_mapping", "api_key", "base_url", "openai_capabilities", "project_id", "oauth_type", "plan_type", "account_scheduling_threshold"}
 	filtered := make(map[string]any)
 	for _, key := range keys {
 		if value, ok := credentials[key]; ok && value != nil {
