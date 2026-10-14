@@ -247,7 +247,7 @@ func (h *APIKeyHandler) EnsureCanvasMedia(c *gin.Context) {
 		return
 	}
 	c.Header("Cache-Control", "no-store")
-	response.Success(c, dto.APIKeyFromService(key))
+	response.Success(c, dto.APIKeyFromService(key).Localized(c.GetHeader("Accept-Language")))
 }
 
 // Update handles updating an API key
