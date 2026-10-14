@@ -80,7 +80,7 @@ RUN --mount=type=cache,id=sub2api-gomod,target=/go/pkg/mod \
 # Copy backend source first
 COPY backend/ ./
 RUN test -z "$(find migrations -name '._*' -print -quit)" && \
-    test "$(cat cmd/server/VERSION)" = "0.2.15.1-yangtoken-video"
+    test "$(cat cmd/server/VERSION)" = "0.2.16.1-yangtoken-video"
 
 # Copy frontend dist from previous stage (must be after backend copy to avoid being overwritten)
 COPY --from=frontend-builder /app/backend/internal/web/dist ./internal/web/dist

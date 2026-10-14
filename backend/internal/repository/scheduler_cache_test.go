@@ -39,6 +39,23 @@ func TestSchedulerMetadataAccountKeepsHostedVideoCapability(t *testing.T) {
 	require.False(t, metadata.SupportsOpenAIEndpointCapability(service.OpenAIEndpointCapabilityHostedVideo))
 }
 
+func TestFilterSchedulerCredentialsKeepsGeminiExplicitCacheKeys(t *testing.T) {
+	filtered := filterSchedulerCredentials(map[string]any{
+		"api_key":              "k",
+		"base_url":             "https://gw.example.com",
+		"auth_mode":            "apikey",
+		"service_account_json": "secret",
+		service.GeminiExplicitCacheUpstreamCredentialKey:       true,
+		service.GeminiExplicitCacheUpstreamMaxTTLCredentialKey: 3600,
+	})
+
+	require.Equal(t, "https://gw.example.com", filtered["base_url"])
+	require.Equal(t, "apikey", filtered["auth_mode"])
+	require.Equal(t, true, filtered[service.GeminiExplicitCacheUpstreamCredentialKey])
+	require.Equal(t, 3600, filtered[service.GeminiExplicitCacheUpstreamMaxTTLCredentialKey])
+	require.NotContains(t, filtered, "service_account_json")
+}
+
 func TestSchedulerMetadataAccountKeepsOpenAISubscriptionIdentity(t *testing.T) {
 	account := service.Account{
 		ID:       24,
