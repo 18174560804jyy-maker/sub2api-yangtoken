@@ -8,7 +8,7 @@
 # =============================================================================
 
 ARG NODE_IMAGE=node:24-alpine
-ARG GOLANG_IMAGE=golang:1.27.2-alpine
+ARG GOLANG_IMAGE=golang:1.27.3-alpine
 ARG ALPINE_IMAGE=alpine:3.21
 ARG POSTGRES_IMAGE=postgres:18-alpine
 ARG GOPROXY=https://goproxy.cn,direct
@@ -80,7 +80,7 @@ RUN --mount=type=cache,id=sub2api-gomod,target=/go/pkg/mod \
 # Copy backend source first
 COPY backend/ ./
 RUN test -z "$(find migrations -name '._*' -print -quit)" && \
-    test "$(cat cmd/server/VERSION)" = "0.2.17.1-yangtoken-video"
+    test "$(cat cmd/server/VERSION)" = "0.2.18.1-yangtoken-video"
 
 # Copy frontend dist from previous stage (must be after backend copy to avoid being overwritten)
 COPY --from=frontend-builder /app/backend/internal/web/dist ./internal/web/dist
