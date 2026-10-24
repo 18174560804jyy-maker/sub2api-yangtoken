@@ -17,8 +17,10 @@ func TestCreateScheduledClaudeTestPayloadIsLightweight(t *testing.T) {
 	require.NotContains(t, payload, "metadata")
 	require.NotContains(t, payload, "temperature")
 
-	messages := payload["messages"].([]map[string]any)
-	content := messages[0]["content"].([]map[string]any)
+	messages, ok := payload["messages"].([]map[string]any)
+	require.True(t, ok)
+	content, ok := messages[0]["content"].([]map[string]any)
+	require.True(t, ok)
 	require.Equal(t, scheduledAccountTestPrompt, content[0]["text"])
 }
 
@@ -31,8 +33,10 @@ func TestCreateScheduledOpenAITestPayloadIsLightweight(t *testing.T) {
 	require.NotContains(t, payload, "instructions")
 	require.NotContains(t, payload, "store")
 
-	input := payload["input"].([]map[string]any)
-	content := input[0]["content"].([]map[string]any)
+	input, ok := payload["input"].([]map[string]any)
+	require.True(t, ok)
+	content, ok := input[0]["content"].([]map[string]any)
+	require.True(t, ok)
 	require.Equal(t, scheduledAccountTestPrompt, content[0]["text"])
 }
 
@@ -47,6 +51,7 @@ func TestCreateScheduledOpenAIChatCompletionsPayloadIsLightweight(t *testing.T) 
 	payload := createScheduledOpenAIChatCompletionsTestPayload("gpt-5.6-sol")
 
 	require.Equal(t, scheduledOpenAIMaxOutputTokens, payload["max_tokens"])
-	messages := payload["messages"].([]map[string]any)
+	messages, ok := payload["messages"].([]map[string]any)
+	require.True(t, ok)
 	require.Equal(t, scheduledAccountTestPrompt, messages[0]["content"])
 }

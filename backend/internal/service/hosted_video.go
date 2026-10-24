@@ -283,7 +283,7 @@ func (s *OpenAIGatewayService) ForwardHostedVideo(ctx context.Context, c *gin.Co
 	if err != nil {
 		return nil, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	result.Duration, result.ResponseHeaders = time.Since(started), resp.Header.Clone()
 	if endpoint == HostedVideoContent && (resp.StatusCode == http.StatusOK || resp.StatusCode == http.StatusPartialContent) {
 		contentType := strings.ToLower(resp.Header.Get("Content-Type"))
