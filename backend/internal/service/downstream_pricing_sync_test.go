@@ -52,8 +52,11 @@ func TestPublicPricingHidesSupplierPricesAndComputesCustomerMultiples(t *testing
 	var payload map[string]any
 	require.NoError(t, json.Unmarshal(body, &payload))
 	require.NotContains(t, payload, "source_url")
-	for _, model := range payload["models"].([]any) {
-		row := model.(map[string]any)
+	models, ok := payload["models"].([]any)
+	require.True(t, ok)
+	for _, model := range models {
+		row, ok := model.(map[string]any)
+		require.True(t, ok)
 		require.NotContains(t, row, "selling")
 		require.NotContains(t, row, "multiple")
 	}
