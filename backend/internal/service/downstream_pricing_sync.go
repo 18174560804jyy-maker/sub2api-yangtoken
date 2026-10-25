@@ -15,10 +15,11 @@ import (
 )
 
 const (
-	DownstreamPricingSourceURL = "https://sub2.herohao.top/pricing/api/pricing"
-	downstreamPricingBodyLimit = 2 << 20
-	downstreamPricingTimeout   = 12 * time.Second
-	maxDownstreamModels        = 2000
+	DownstreamPricingSourceURL     = "https://sub2.herohao.top/pricing/api/pricing"
+	defaultPublicPricingMultiplier = 0.3
+	downstreamPricingBodyLimit     = 2 << 20
+	downstreamPricingTimeout       = 12 * time.Second
+	maxDownstreamModels            = 2000
 )
 
 type DownstreamPriceSet struct {
@@ -54,6 +55,7 @@ type DownstreamModelOverride struct {
 
 type DownstreamPricingConfig struct {
 	ChannelID         int64                     `json:"channel_id"`
+	GroupMultiplier   float64                   `json:"-"`
 	MarkupPercent     float64                   `json:"markup_percent"`
 	Overrides         []DownstreamModelOverride `json:"overrides"`
 	ManagedModels     []string                  `json:"managed_models"`
@@ -193,10 +195,11 @@ func (s *DownstreamPricingSyncService) GetPublic(ctx context.Context) (*Downstre
 		if ok && !state.Enabled {
 			continue
 		}
-		effective := markedUpPrices(item.Selling, config.MarkupPercent)
-		if ok && state.Manual {
-			effective = state.Prices
+		multiple := config.GroupMultiplier
+		if multiple <= 0 {
+			multiple = defaultPublicPricingMultiplier
 		}
+		effective := scaledPrices(item.Official, multiple)
 		models = append(models, DownstreamPublicPricingModel{
 			Model: item.Model, Provider: item.Provider, ProviderKey: item.ProviderKey,
 			Official:  item.Official,
@@ -206,6 +209,15 @@ func (s *DownstreamPricingSyncService) GetPublic(ctx context.Context) (*Downstre
 	return &DownstreamPublicPricingView{
 		Models: models, SnapshotFetchedAt: config.SnapshotFetchedAt,
 	}, nil
+}
+
+func scaledPrices(prices DownstreamPriceSet, multiple float64) DownstreamPriceSet {
+	return DownstreamPriceSet{
+		Input:      prices.Input * multiple,
+		Output:     prices.Output * multiple,
+		CacheRead:  prices.CacheRead * multiple,
+		CacheWrite: prices.CacheWrite * multiple,
+	}
 }
 
 func (s *DownstreamPricingSyncService) Save(ctx context.Context, channelID int64, input SaveDownstreamPricingInput) (*DownstreamPricingView, error) {

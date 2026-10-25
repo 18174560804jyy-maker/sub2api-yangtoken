@@ -267,7 +267,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	scheduledTestHandler := admin.NewScheduledTestHandler(scheduledTestService)
 	downstreamPricingRepository := repository.NewDownstreamPricingRepository(db)
 	downstreamPricingSyncService := service.NewDownstreamPricingSyncService(downstreamPricingRepository, channelService, gatewayService)
-	channelHandler := admin.NewChannelHandler(channelService, billingService, pricingService, downstreamPricingSyncService)
+	channelHandler := admin.NewChannelHandler(channelService, billingService, pricingService)
 	channelMonitorHandler := admin.NewChannelMonitorHandler(channelMonitorService)
 	channelMonitorRequestTemplateRepository := repository.NewChannelMonitorRequestTemplateRepository(client, db)
 	channelMonitorRequestTemplateService := service.NewChannelMonitorRequestTemplateService(channelMonitorRequestTemplateRepository)

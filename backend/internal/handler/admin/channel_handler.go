@@ -16,15 +16,14 @@ import (
 
 // ChannelHandler handles admin channel management
 type ChannelHandler struct {
-	channelService           *service.ChannelService
-	billingService           *service.BillingService
-	pricingService           *service.PricingService
-	downstreamPricingService *service.DownstreamPricingSyncService
+	channelService *service.ChannelService
+	billingService *service.BillingService
+	pricingService *service.PricingService
 }
 
 // NewChannelHandler creates a new admin channel handler
-func NewChannelHandler(channelService *service.ChannelService, billingService *service.BillingService, pricingService *service.PricingService, downstreamPricingService *service.DownstreamPricingSyncService) *ChannelHandler {
-	return &ChannelHandler{channelService: channelService, billingService: billingService, pricingService: pricingService, downstreamPricingService: downstreamPricingService}
+func NewChannelHandler(channelService *service.ChannelService, billingService *service.BillingService, pricingService *service.PricingService) *ChannelHandler {
+	return &ChannelHandler{channelService: channelService, billingService: billingService, pricingService: pricingService}
 }
 
 // --- Request / Response types ---
@@ -593,43 +592,6 @@ func (h *ChannelHandler) Delete(c *gin.Context) {
 	}
 
 	response.Success(c, gin.H{"message": "Channel deleted successfully"})
-}
-
-// GetDownstreamPricing refreshes the fixed HeroHao source and returns the
-// effective per-million-token prices for one local production channel.
-func (h *ChannelHandler) GetDownstreamPricing(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		response.ErrorFrom(c, infraerrors.BadRequest("INVALID_CHANNEL_ID", "Invalid channel ID"))
-		return
-	}
-	view, err := h.downstreamPricingService.Get(c.Request.Context(), id)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	response.Success(c, view)
-}
-
-// SaveDownstreamPricing performs a fresh production read and atomically writes
-// the resulting managed pricing and model restriction to the selected channel.
-func (h *ChannelHandler) SaveDownstreamPricing(c *gin.Context) {
-	id, err := strconv.ParseInt(c.Param("id"), 10, 64)
-	if err != nil {
-		response.ErrorFrom(c, infraerrors.BadRequest("INVALID_CHANNEL_ID", "Invalid channel ID"))
-		return
-	}
-	var input service.SaveDownstreamPricingInput
-	if err := c.ShouldBindJSON(&input); err != nil {
-		response.ErrorFrom(c, infraerrors.BadRequest("VALIDATION_ERROR", err.Error()))
-		return
-	}
-	view, err := h.downstreamPricingService.Save(c.Request.Context(), id, input)
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-	response.Success(c, view)
 }
 
 // GetModelDefaultPricing 获取模型的默认定价（用于前端自动填充）

@@ -49,12 +49,19 @@ func (r *downstreamPricingRepository) GetLatest(ctx context.Context) (*service.D
 	config := &service.DownstreamPricingConfig{}
 	var overridesJSON, managedJSON, snapshotJSON []byte
 	err := r.db.QueryRowContext(ctx, `
-		SELECT channel_id, markup_percent, model_overrides, managed_models,
-		       COALESCE(upstream_snapshot, '[]'::jsonb), snapshot_fetched_at
-		FROM channel_downstream_pricing_sync
-		WHERE jsonb_array_length(managed_models) > 0
-		ORDER BY updated_at DESC LIMIT 1`).Scan(
-		&config.ChannelID, &config.MarkupPercent, &overridesJSON, &managedJSON, &snapshotJSON, &config.SnapshotFetchedAt,
+		SELECT s.channel_id, s.markup_percent, s.model_overrides, s.managed_models,
+		       COALESCE(s.upstream_snapshot, '[]'::jsonb), s.snapshot_fetched_at,
+		       COALESCE((
+				SELECT g.rate_multiplier
+				FROM channel_groups cg
+				JOIN groups g ON g.id = cg.group_id
+				WHERE cg.channel_id = s.channel_id AND g.deleted_at IS NULL
+				ORDER BY cg.id LIMIT 1
+			), 0)
+		FROM channel_downstream_pricing_sync s
+		WHERE jsonb_array_length(s.managed_models) > 0
+		ORDER BY s.updated_at DESC LIMIT 1`).Scan(
+		&config.ChannelID, &config.MarkupPercent, &overridesJSON, &managedJSON, &snapshotJSON, &config.SnapshotFetchedAt, &config.GroupMultiplier,
 	)
 	if err == sql.ErrNoRows {
 		return nil, nil

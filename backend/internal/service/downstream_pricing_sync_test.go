@@ -22,9 +22,10 @@ func (r publicPricingTestRepository) GetLatest(context.Context) (*DownstreamPric
 	return r.config, nil
 }
 
-func TestPublicPricingHidesSupplierPricesAndComputesCustomerMultiples(t *testing.T) {
+func TestPublicPricingUsesGroupMultiplierAndHidesSupplierPrices(t *testing.T) {
 	svc := &DownstreamPricingSyncService{repo: publicPricingTestRepository{
 		config: &DownstreamPricingConfig{
+			GroupMultiplier: .3,
 			MarkupPercent: 100,
 			Snapshot: []DownstreamUpstreamModel{
 				{Model: "automatic", Official: DownstreamPriceSet{Input: 1, Output: 4, CacheRead: .02}, Selling: DownstreamPriceSet{Input: .08, Output: .32, CacheRead: .0016}},
@@ -41,12 +42,12 @@ func TestPublicPricingHidesSupplierPricesAndComputesCustomerMultiples(t *testing
 	require.NoError(t, err)
 	require.Len(t, view.Models, 2)
 	require.Equal(t, 1.0, view.Models[0].Official.Input)
-	require.Equal(t, .16, view.Models[0].Effective.Input)
-	require.InDelta(t, .16, *view.Models[0].EffectiveMultiple.Input, 1e-10)
-	require.InDelta(t, .16, *view.Models[0].EffectiveMultiple.CacheRead, 1e-10)
+	require.Equal(t, .3, view.Models[0].Effective.Input)
+	require.InDelta(t, .3, *view.Models[0].EffectiveMultiple.Input, 1e-10)
+	require.InDelta(t, .3, *view.Models[0].EffectiveMultiple.CacheRead, 1e-10)
 	require.Nil(t, view.Models[0].EffectiveMultiple.CacheWrite)
-	require.Equal(t, .5, view.Models[1].Effective.Input)
-	require.Equal(t, .25, *view.Models[1].EffectiveMultiple.Input)
+	require.Equal(t, .6, view.Models[1].Effective.Input)
+	require.Equal(t, .3, *view.Models[1].EffectiveMultiple.Input)
 	body, err := json.Marshal(view)
 	require.NoError(t, err)
 	var payload map[string]any

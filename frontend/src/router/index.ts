@@ -506,18 +506,6 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
-    path: '/admin/channels/downstream-pricing',
-    name: 'AdminDownstreamPricing',
-    component: () => import('@/views/admin/DownstreamPricingView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: true,
-      title: 'Downstream Pricing',
-      titleKey: 'admin.channels.downstreamPricing.title',
-      descriptionKey: 'admin.channels.downstreamPricing.description'
-    }
-  },
-  {
     path: '/monitor',
     name: 'ChannelStatus',
     component: () => import('@/views/user/ChannelStatusView.vue'),

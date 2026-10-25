@@ -194,62 +194,6 @@ export interface SyncPricingModelsResult {
   models: string[]
 }
 
-export interface DownstreamPriceSet {
-  input: number
-  output: number
-  cache_read: number
-  cache_write: number
-}
-
-export interface DownstreamMultipleSet {
-  input: number | null
-  output: number | null
-  cache_read: number | null
-  cache_write: number | null
-}
-
-export interface DownstreamPricingModel {
-  model: string
-  provider: string
-  provider_key: string
-  enabled: boolean
-  manual: boolean
-  official: DownstreamPriceSet
-  selling: DownstreamPriceSet
-  multiple: DownstreamMultipleSet
-  effective: DownstreamPriceSet
-}
-
-export interface DownstreamPricingView {
-  channel_id: number
-  source_url: string
-  markup_percent: number
-  models: DownstreamPricingModel[]
-  snapshot_fetched_at?: string
-  stale: boolean
-  warning?: string
-}
-
-export interface SaveDownstreamPricingRequest {
-  markup_percent: number
-  models: Array<{
-    model: string
-    enabled: boolean
-    manual: boolean
-    prices: DownstreamPriceSet
-  }>
-}
-
-export async function getDownstreamPricing(channelId: number): Promise<DownstreamPricingView> {
-  const { data } = await apiClient.get<DownstreamPricingView>(`/admin/channels/${channelId}/downstream-pricing`)
-  return data
-}
-
-export async function saveDownstreamPricing(channelId: number, req: SaveDownstreamPricingRequest): Promise<DownstreamPricingView> {
-  const { data } = await apiClient.put<DownstreamPricingView>(`/admin/channels/${channelId}/downstream-pricing`, req)
-  return data
-}
-
 /**
  * Fetch the latest model names from the LiteLLM pricing catalog for the given platform
  */
@@ -260,5 +204,5 @@ export async function syncPricingModels(platform: string): Promise<SyncPricingMo
   return data
 }
 
-const channelsAPI = { list, getById, create, update, remove, getModelDefaultPricing, syncPricingModels, getDownstreamPricing, saveDownstreamPricing }
+const channelsAPI = { list, getById, create, update, remove, getModelDefaultPricing, syncPricingModels }
 export default channelsAPI
