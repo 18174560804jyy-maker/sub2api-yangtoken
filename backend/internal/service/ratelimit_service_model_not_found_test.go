@@ -49,6 +49,7 @@ func TestRateLimitService_HandleUpstreamError_ModelNotFoundUsesModelRateLimit(t 
 	repo := &modelNotFoundAccountRepoStub{}
 	svc := &RateLimitService{accountRepo: repo}
 	account := openAIModelNotFoundTempAccount()
+	account.Credentials["temp_unschedulable_rules"] = []any{}
 
 	handled := svc.HandleUpstreamError(
 		context.Background(),

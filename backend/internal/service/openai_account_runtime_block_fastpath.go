@@ -101,6 +101,15 @@ func (s *OpenAIGatewayService) handleOpenAIAccountUpstreamError(ctx context.Cont
 		scheduleOllamaCloudUsageActivity(s.deferredService, account)
 		scheduleOpenCodeGoUsageActivity(s.deferredService, account)
 	}
+	// An explicit model-scoped policy takes precedence over the generic
+	// request-scoped capacity-shed shortcut below. Persist only the affected
+	// account/model pair so a matching upstream failure can fail over safely.
+	if s != nil && account != nil && s.rateLimitService != nil && len(canonicalModel) > 0 &&
+		strings.TrimSpace(canonicalModel[0]) != "" &&
+		tempUnschedExplicitModelRuleApplies(account, statusCode, responseBody, canonicalModel[0]) &&
+		s.rateLimitService.HandleTempUnschedulable(ctx, account, statusCode, responseBody, canonicalModel[0]) {
+		return true
+	}
 	// Capacity shedding describes this request, not account health. Keep the
 	// account schedulable while the request-local retry budget handles recovery.
 	if account != nil && account.Platform == PlatformOpenAI && isOpenAIRequestScopedCapacityShed("", responseBody) {

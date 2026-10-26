@@ -365,6 +365,15 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 		return false
 	}
 
+	// Explicit model-scoped rules must take precedence over the built-in
+	// model-not-found cooldown, which otherwise uses a longer fixed duration.
+	// Preserve Anthropic's native 429 window handling below.
+	if !(statusCode == http.StatusTooManyRequests && account.Platform == PlatformAnthropic) &&
+		tempUnschedExplicitModelRuleApplies(account, statusCode, responseBody, firstRequestedModel(requestedModel)) &&
+		s.HandleTempUnschedulable(ctx, account, statusCode, responseBody, firstRequestedModel(requestedModel)) {
+		return true
+	}
+
 	if len(requestedModel) > 0 && s.HandleUpstreamModelNotFound(ctx, account, requestedModel[0], statusCode, responseBody) {
 		return true
 	}
@@ -2677,6 +2686,23 @@ func tempUnschedRulesApply(account *Account, statusCode int, responseBody []byte
 	}
 	matches := matchTempUnschedulableRules(account, statusCode, responseBody)
 	return len(matches) > 0 && tempUnschedHitUsesModelScope(account, matches[0].rule, modelKey, statusCode, responseBody)
+}
+
+// tempUnschedExplicitModelRuleApplies is used by fast paths that otherwise
+// classify a failure as request-scoped. Only an administrator rule that
+// explicitly declares model scope may override that classification; legacy
+// rules without scope keep their historical behavior.
+func tempUnschedExplicitModelRuleApplies(account *Account, statusCode int, responseBody []byte, modelKey string) bool {
+	matches := matchTempUnschedulableRules(account, statusCode, responseBody)
+	if statusCode == http.StatusUnauthorized && len(matches) > 1 {
+		matches = matches[:1]
+	}
+	for _, match := range matches {
+		if match.rule.Scope == TempUnschedScopeModel && tempUnschedHitUsesModelScope(account, match.rule, modelKey, statusCode, responseBody) {
+			return true
+		}
+	}
+	return false
 }
 
 // tempUnschedHitUsesModelScope 决定一次命中是否按模型级冷却：凭据级 401 始终按账号处理，
