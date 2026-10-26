@@ -60,8 +60,36 @@ jobs:
       - name: Install frontend dependencies
         working-directory: frontend
         run: pnpm install --frozen-lockfile
-      - name: Frontend typecheck and critical vitest
-        run: make test-frontend
+      - name: Frontend lint
+        working-directory: frontend
+        run: pnpm run lint:check
+      - name: Frontend typecheck
+        working-directory: frontend
+        run: pnpm run typecheck
+      - name: Full frontend test suite
+        working-directory: frontend
+        run: pnpm run test:run
+      - name: Frontend production build
+        working-directory: frontend
+        run: pnpm run build
+
+  image-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: docker/setup-buildx-action@v3
+      - name: Build production amd64 image with cache
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          platforms: linux/amd64
+          push: false
+          tags: sub2api:ci
+          build-args: |
+            COMMIT=${{ github.sha }}
+          cache-from: type=gha,scope=sub2api-amd64
+          cache-to: type=gha,mode=max,scope=sub2api-amd64
 
   golangci-lint:
     runs-on: ubuntu-latest

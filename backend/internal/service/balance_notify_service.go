@@ -322,10 +322,17 @@ func filterVerifiedEmails(entries []NotifyEmailEntry) []string {
 	return recipients
 }
 
-// collectBalanceNotifyRecipients returns verified, non-disabled email recipients.
-// Only emails with verified=true and disabled=false are included.
+// collectBalanceNotifyRecipients sends low-balance alerts to the user's
+// registration email. Extra notification emails are intentionally ignored.
 func (s *BalanceNotifyService) collectBalanceNotifyRecipients(user *User) []string {
-	return filterVerifiedEmails(user.BalanceNotifyExtraEmails)
+	if user == nil {
+		return nil
+	}
+	email := strings.TrimSpace(user.Email)
+	if email == "" {
+		return nil
+	}
+	return []string{email}
 }
 
 // sendEmails sends an email to all recipients with shared timeout and error logging.

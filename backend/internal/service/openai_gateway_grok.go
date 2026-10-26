@@ -2015,6 +2015,16 @@ func (s *OpenAIGatewayService) handleGrokAccountUpstreamError(ctx context.Contex
 	if isGrokContentPolicyRejection(statusCode, responseBody) {
 		return
 	}
+	// Honor an explicitly configured model-scoped policy before the Grok
+	// classifier's legacy account-wide cooldowns. Callers attach the actual
+	// upstream model to ctx before entering this handler.
+	if s.rateLimitService != nil {
+		if model := grokRequestedModelFromCtx(ctx); model != "" &&
+			tempUnschedExplicitModelRuleApplies(account, statusCode, responseBody, model) &&
+			s.rateLimitService.HandleTempUnschedulable(ctx, account, statusCode, responseBody, model) {
+			return
+		}
+	}
 	now := time.Now()
 	decision := classifyGrokUpstreamFailure(statusCode, responseBody, grokRequestedModelFromCtx(ctx))
 	snapshot := parseGrokQuotaSnapshot(headers, statusCode, now)

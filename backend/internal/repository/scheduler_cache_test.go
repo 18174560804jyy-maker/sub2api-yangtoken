@@ -20,6 +20,25 @@ func TestFilterSchedulerCredentialsKeepsSubscriptionPlanType(t *testing.T) {
 	require.NotContains(t, filtered, "refresh_token")
 }
 
+func TestSchedulerMetadataAccountKeepsHostedVideoCapability(t *testing.T) {
+	account := service.Account{
+		ID:       377,
+		Platform: service.PlatformOpenAI,
+		Type:     service.AccountTypeAPIKey,
+		Credentials: map[string]any{
+			"base_url":            "https://video.example.invalid/v1",
+			"openai_capabilities": []any{"hosted_video"},
+			"refresh_token":       "secret-refresh-token",
+		},
+	}
+	metadata := buildSchedulerMetadataAccount(account)
+	require.True(t, metadata.SupportsOpenAIEndpointCapability(service.OpenAIEndpointCapabilityHostedVideo))
+	require.NotContains(t, metadata.Credentials, "refresh_token")
+	account.Credentials["openai_capabilities"] = []any{"chat_completions"}
+	metadata = buildSchedulerMetadataAccount(account)
+	require.False(t, metadata.SupportsOpenAIEndpointCapability(service.OpenAIEndpointCapabilityHostedVideo))
+}
+
 func TestFilterSchedulerCredentialsKeepsGeminiExplicitCacheKeys(t *testing.T) {
 	filtered := filterSchedulerCredentials(map[string]any{
 		"api_key":              "k",

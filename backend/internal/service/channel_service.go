@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
+	"sort"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -588,6 +589,56 @@ func (s *ChannelService) IsModelRestricted(ctx context.Context, groupID int64, m
 		return false
 	}
 	return checkRestricted(lk, groupID, model)
+}
+
+// HasModelRestriction reports whether the group's channel uses an explicit
+// model allowlist. Model-list handlers use this before selecting a discovery
+// path that would otherwise bypass channel filtering.
+func (s *ChannelService) HasModelRestriction(ctx context.Context, groupID int64) bool {
+	lk, err := s.lookupGroupChannel(ctx, groupID)
+	if err != nil {
+		slog.Warn("failed to load channel cache for model restriction status", "group_id", groupID, "error", err)
+	}
+	return lk != nil && lk.channel.RestrictModels
+}
+
+// FilterAllowedModels applies the channel model restriction to a model-list
+// response. It is deliberately separate from scheduling so /v1/models and the
+// request path use the same allowlist semantics.
+func (s *ChannelService) FilterAllowedModels(ctx context.Context, groupID int64, models []string) []string {
+	lk, err := s.lookupGroupChannel(ctx, groupID)
+	if err != nil || lk == nil || !lk.channel.RestrictModels {
+		return cloneStringSlice(models)
+	}
+	filtered := make([]string, 0, len(models)+len(lk.channel.ModelPricing))
+	seen := make(map[string]struct{}, len(models)+len(lk.channel.ModelPricing))
+	for _, model := range models {
+		if !checkRestricted(lk, groupID, model) {
+			seen[normalizeChannelPricingModelName(model)] = struct{}{}
+			filtered = append(filtered, model)
+		}
+	}
+	// Explicit channel prices are authoritative enabled models. Add them even
+	// when account mappings are incomplete; wildcard rules cannot be enumerated.
+	for _, pricing := range lk.channel.ModelPricing {
+		if !isPlatformPricingMatch(lk.platform, pricing.Platform) {
+			continue
+		}
+		for _, model := range pricing.Models {
+			model = strings.TrimSpace(model)
+			if model == "" || strings.HasSuffix(model, "*") {
+				continue
+			}
+			key := normalizeChannelPricingModelName(model)
+			if _, exists := seen[key]; exists {
+				continue
+			}
+			seen[key] = struct{}{}
+			filtered = append(filtered, model)
+		}
+	}
+	sort.Strings(filtered)
+	return filtered
 }
 
 // ResolveChannelMappingAndRestrict 解析渠道映射。

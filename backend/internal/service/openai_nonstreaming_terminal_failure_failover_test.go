@@ -77,8 +77,9 @@ func TestNonStreamingSSEToJSON_CapacityFailedEventFailsOver(t *testing.T) {
 	var failoverErr *UpstreamFailoverError
 	require.ErrorAs(t, err, &failoverErr)
 	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
-	// 容量降载是请求级信号，先在同账号有界重试——与流式路径同一套策略。
-	require.True(t, failoverErr.RetryableOnSameAccount)
+	// 羊TOKEN策略：真实请求直接切换备用账号，但不改变后续请求的账号调度状态。
+	// 只有定时巡检连续两次命中容量错误时，才会将账号冷却 30 分钟。
+	require.False(t, failoverErr.RetryableOnSameAccount)
 	require.Contains(t, string(failoverErr.ResponseBody), "Selected model is at capacity")
 	// 换号的前提：一个字节都没写出去。
 	require.False(t, c.Writer.Written())

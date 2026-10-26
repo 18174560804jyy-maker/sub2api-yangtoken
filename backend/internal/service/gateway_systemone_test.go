@@ -27,6 +27,7 @@ type systemOnePolicyAccountRepo struct {
 	rateLimitedCalls int
 	overloadedCalls  int
 	errorCalls       int
+	tempBlockedCalls int
 }
 
 func (r *systemOnePolicyAccountRepo) GetByID(context.Context, int64) (*Account, error) {
@@ -45,6 +46,11 @@ func (r *systemOnePolicyAccountRepo) SetOverloaded(context.Context, int64, time.
 
 func (r *systemOnePolicyAccountRepo) SetError(context.Context, int64, string) error {
 	r.errorCalls++
+	return nil
+}
+
+func (r *systemOnePolicyAccountRepo) SetTempUnschedulable(context.Context, int64, time.Time, string) error {
+	r.tempBlockedCalls++
 	return nil
 }
 
@@ -279,9 +285,10 @@ func TestForwardSystemOneAccountLevelFailuresFailOver(t *testing.T) {
 		name      string
 		status    int
 		wantError int
+		wantTemp  int
 	}{
 		{name: "payment required", status: http.StatusPaymentRequired, wantError: 1},
-		{name: "forbidden", status: http.StatusForbidden, wantError: 1},
+		{name: "forbidden", status: http.StatusForbidden, wantTemp: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			account := &Account{ID: 22, Platform: PlatformTypeSafe, Type: AccountTypeAPIKey, Credentials: map[string]any{"base_url": "http://typesafe.test", "api_key": "ts-secret"}}
@@ -297,6 +304,7 @@ func TestForwardSystemOneAccountLevelFailuresFailOver(t *testing.T) {
 			require.Equal(t, tc.status, failoverErr.StatusCode)
 			require.Equal(t, tc.wantError, repo.errorCalls)
 			require.Equal(t, "failover", systemOneOpsEvents(t, c)[0].Kind)
+			require.Equal(t, tc.wantTemp, repo.tempBlockedCalls)
 		})
 	}
 }

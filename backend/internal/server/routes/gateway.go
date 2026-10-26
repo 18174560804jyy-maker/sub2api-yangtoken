@@ -90,6 +90,10 @@ func RegisterGatewayRoutes(
 		}
 	}
 	videoGenerationHandler := func(c *gin.Context) {
+		if getGroupPlatform(c) == service.PlatformOpenAI {
+			h.OpenAIGateway.HostedVideoGeneration(c)
+			return
+		}
 		// Video status/content lookups below already allow Composite groups; keep
 		// task creation aligned so composite keys that route to Grok accounts can
 		// submit video generation jobs.
@@ -106,6 +110,10 @@ func RegisterGatewayRoutes(
 		})
 	}
 	videoStatusHandler := func(c *gin.Context) {
+		if getGroupPlatform(c) == service.PlatformOpenAI {
+			h.OpenAIGateway.HostedVideoStatus(c)
+			return
+		}
 		// Video status requests do not carry a model, so composite groups cannot
 		// be resolved by compositeTargetPlatformMiddleware. Route them through
 		// the Grok handler and let scheduler/account selection enforce capacity.
@@ -122,6 +130,10 @@ func RegisterGatewayRoutes(
 		})
 	}
 	videoContentHandler := func(c *gin.Context) {
+		if getGroupPlatform(c) == service.PlatformOpenAI {
+			h.OpenAIGateway.HostedVideoContent(c)
+			return
+		}
 		// Video content requests do not carry a model, so composite groups cannot
 		// be resolved by compositeTargetPlatformMiddleware. Route them through
 		// the Grok handler just like video status lookups.
@@ -268,6 +280,7 @@ func RegisterGatewayRoutes(
 		// OpenAI-compatible clients may create through /videos; xAI receives the
 		// canonical /videos/generations route inside the Grok media forwarder.
 		gateway.POST("/videos", videoGenerationHandler)
+		gateway.POST("/videos/quote", h.OpenAIGateway.HostedVideoQuote)
 		gateway.POST("/videos/generations", videoGenerationHandler)
 		gateway.POST("/videos/edits", videoEditHandler)
 		gateway.POST("/videos/extensions", videoExtensionHandler)

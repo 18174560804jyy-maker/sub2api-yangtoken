@@ -86,3 +86,32 @@ func TestRateLimitService_HandleUpstreamError_OpenAI403ThresholdDisables(t *test
 	require.Contains(t, repo.lastErrorMsg, "workspace forbidden by policy")
 	require.Contains(t, repo.lastErrorMsg, "consecutive_403=3/3")
 }
+
+func TestRateLimitService_HandleUpstreamError_AnthropicAPIKey403TempUnschedulable(t *testing.T) {
+	repo := &rateLimitAccountRepoStub{}
+	blocker := &runtimeBlockRecorder{}
+	service := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+	service.SetAccountRuntimeBlocker(blocker)
+	account := &Account{
+		ID:       303,
+		Platform: PlatformAnthropic,
+		Type:     AccountTypeAPIKey,
+	}
+
+	shouldDisable := service.HandleUpstreamError(
+		context.Background(),
+		account,
+		http.StatusForbidden,
+		http.Header{},
+		[]byte(`{"error":{"message":"Insufficient account balance"}}`),
+	)
+
+	require.True(t, shouldDisable)
+	require.Equal(t, 0, repo.setErrorCalls)
+	require.Equal(t, 1, repo.tempCalls)
+	require.Equal(t, account.ID, repo.lastTempID)
+	require.Contains(t, repo.lastTempReason, "Insufficient account balance")
+	require.Len(t, blocker.accounts, 1)
+	require.Equal(t, "api_key_403_temp", blocker.reasons[0])
+	require.True(t, blocker.until[0].After(time.Now()))
+}

@@ -1682,10 +1682,11 @@ func openAIStreamFailedEventRetryableOnSameAccount(account *Account, payload []b
 	if account == nil {
 		return false
 	}
-	// 容量降载是请求级信号，不是账号级故障：上游只是让本次请求稍后再试。
-	// 换账号并不改变被降载的因素（客户端身份、模型容量都与账号无关），
-	// 只会让单个请求把整池账号逐个消耗掉，最终仍以同一个错误告终。
-	// 因此先在同一账号上做有界重试，用尽后才按常规流程切号。
+	if isOpenAIAccountCapacityError(payload, message) {
+		return false
+	}
+	// slow_down remains request-scoped: retry it on the same account before
+	// failing over. Account-capacity errors are handled above and skip this path.
 	if isOpenAIUpstreamCapacityShedEvent(payload) {
 		return true
 	}
@@ -1706,6 +1707,7 @@ func (s *OpenAIGatewayService) recordOpenAIStreamUpstreamError(
 	payload []byte,
 	message string,
 ) string {
+	s.observeOpenAIAccountCapacity(account, payload, message)
 	message = sanitizeUpstreamErrorMessage(strings.TrimSpace(message))
 	if message == "" {
 		message = "OpenAI upstream response failed"
@@ -1795,6 +1797,12 @@ func (s *OpenAIGatewayService) newOpenAIStreamFailoverErrorWithModel(
 		classificationHeaders = nil
 	}
 	failoverErr := s.newOpenAIAccountFailoverErrorWithClassificationHeaders(account, statusCode, headers, classificationHeaders, payload, message, shouldDisable, retryableOnSameAccount)
+	if isOpenAIAccountCapacityError(payload, message) {
+		// Responses stream capacity errors are account-scoped in the custom
+		// policy; do not spend another attempt on the same account.
+		failoverErr.RetryableOnSameAccount = false
+		failoverErr.RequestScopedTransient = false
+	}
 	if failoverErr.IsCredentialFailure() || failoverErr.RequestScopedTransient {
 		return failoverErr
 	}
@@ -2092,6 +2100,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 				failedMessage = extractOpenAISSEErrorMessage(dataBytes)
 				if failedMessage == "" {
 					failedMessage = "Upstream response failed"
+				}
+				if openAIStreamClientOutputStarted(c, clientOutputStarted) {
+					s.observeOpenAIAccountCapacity(account, dataBytes, failedMessage)
 				}
 				// response.failed 自带上游已消耗的 usage（input token 通常已扣）；必须先解析
 				// 再打 cyber 标记，否则 mark 记到的是解析前的 0，导致流式 cyber 按 0 token 计费

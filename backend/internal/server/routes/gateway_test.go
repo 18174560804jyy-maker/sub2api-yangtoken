@@ -302,8 +302,8 @@ func TestGatewayRoutesCompositeChatCompletionsWithGrokModelUsesOpenAIGateway(t *
 	}
 }
 
-func TestGatewayRoutesNonGrokVideosAreRejectedAtPlatformGate(t *testing.T) {
-	router := newGatewayRoutesTestRouter(service.PlatformOpenAI)
+func TestGatewayRoutesUnsupportedPlatformVideosAreRejectedAtPlatformGate(t *testing.T) {
+	router := newGatewayRoutesTestRouter(service.PlatformAnthropic)
 
 	for _, tc := range []struct {
 		method string
@@ -342,6 +342,18 @@ func TestGatewayRoutesNonGrokVideosAreRejectedAtPlatformGate(t *testing.T) {
 		router.ServeHTTP(w, req)
 		require.Equal(t, http.StatusNotFound, w.Code, "method=%s path=%s", tc.method, tc.path)
 		require.Contains(t, w.Body.String(), "Videos API is not supported for this platform")
+	}
+}
+
+func TestGatewayRoutesHostedVideoCreationRequiresIdempotencyKey(t *testing.T) {
+	router := newGatewayRoutesTestRouter(service.PlatformOpenAI)
+	for _, path := range []string{"/v1/videos", "/v1/videos/generations", "/videos", "/videos/generations"} {
+		req := httptest.NewRequest(http.MethodPost, path, strings.NewReader(`{"model":"veo3","prompt":"waves"}`))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		router.ServeHTTP(w, req)
+		require.Equal(t, http.StatusBadRequest, w.Code, "path=%s", path)
+		require.Contains(t, w.Body.String(), "Idempotency-Key")
 	}
 }
 

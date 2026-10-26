@@ -58,3 +58,28 @@ func TestGrokImagineAspectRatioFromSize(t *testing.T) {
 	require.Equal(t, "4:3", grokImagineAspectRatioFromSize("1536x1152"))
 	require.Equal(t, "16:9", grokImagineAspectRatioFromSize("1792x1024"))
 }
+
+func TestGrokImageResolutionBilling(t *testing.T) {
+	for _, tc := range []struct {
+		name, request, input, tier string
+	}{
+		{"canvas_1k", `{"model":"grok-imagine-image","resolution":"1k","aspect_ratio":"1:1"}`, "1k", ImageBillingSize1K},
+		{"canvas_2k", `{"model":"grok-imagine-image","resolution":"2K","aspect_ratio":"16:9"}`, "2k", ImageBillingSize2K},
+		{"explicit_1k_over_size", `{"model":"grok-imagine-image","resolution":"1k","size":"2048x2048"}`, "1k", ImageBillingSize1K},
+		{"explicit_2k_over_size", `{"model":"grok-imagine-image","resolution":"2k","size":"1024x1024"}`, "2k", ImageBillingSize2K},
+		{"legacy_size", `{"model":"grok-imagine-image","size":"1024x1024"}`, "1024x1024", ImageBillingSize1K},
+		{"missing_geometry", `{"model":"grok-imagine-image"}`, "", ImageBillingSize2K},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			info := ParseGrokMediaRequest("application/json", []byte(tc.request))
+			require.Equal(t, tc.tier, info.SizeTier)
+			for _, endpoint := range []GrokMediaEndpoint{GrokMediaEndpointImagesGenerations, GrokMediaEndpointImagesEdits} {
+				meta := grokMediaUsageFromResponse(endpoint, info, []byte(`{"data":[{"url":"https://example.com/image.png"}]}`))
+				require.Equal(t, tc.input, meta.ImageInputSize)
+				result := &OpenAIForwardResult{ImageCount: meta.ImageCount, ImageSize: meta.ImageSize, ImageInputSize: meta.ImageInputSize, ImageOutputSizes: meta.ImageOutputSizes}
+				ApplyOpenAIImageBillingResolution(result)
+				require.Equal(t, tc.tier, result.ImageSize)
+			}
+		})
+	}
+}

@@ -41,11 +41,11 @@ func (e GrokMediaEndpoint) RequiresRequestBody() bool {
 }
 
 func (e GrokMediaEndpoint) IsVideoLookupRequest() bool {
-	return e == GrokMediaEndpointVideoStatus || e == GrokMediaEndpointVideoContent || e == SeedanceEndpointStatus || e == SeedanceEndpointDelete
+	return e == GrokMediaEndpointVideoStatus || e == GrokMediaEndpointVideoContent || e == SeedanceEndpointStatus || e == SeedanceEndpointDelete || e == HostedVideoStatus || e == HostedVideoContent
 }
 
 func (e GrokMediaEndpoint) IsGenerationRequest() bool {
-	if e == SeedanceEndpointCreate {
+	if e == SeedanceEndpointCreate || e == HostedVideoCreate {
 		return true
 	}
 	switch e {
@@ -134,6 +134,9 @@ func ParseGrokMediaRequest(contentType string, body []byte) GrokMediaRequestInfo
 	info.SizeTier = NormalizeImageBillingTierOrDefault(info.Size)
 	info.AspectRatio = strings.TrimSpace(info.AspectRatio)
 	info.ImageResolution = grokImagineImageResolution(info.ImageResolution)
+	if info.ImageResolution != "" {
+		info.SizeTier = NormalizeImageBillingTierOrDefault(info.ImageResolution)
+	}
 	info.Resolution = NormalizeVideoBillingResolutionOrDefault(info.Resolution)
 	info.DurationSeconds = NormalizeVideoBillingDurationSecondsOrDefault(info.DurationSeconds)
 	if info.N <= 0 {
@@ -375,12 +378,13 @@ func (s *OpenAIGatewayService) SelectMediaVideoRequestAccount(
 // first observes a completed video URL. Status may omit model/duration; we fall
 // back to this snapshot, then defaults.
 type GrokVideoPendingBilling struct {
-	Model                string `json:"model"`
-	BillingModel         string `json:"billing_model,omitempty"`
-	UpstreamModel        string `json:"upstream_model,omitempty"`
-	VideoResolution      string `json:"video_resolution,omitempty"`
-	VideoDurationSeconds int    `json:"video_duration_seconds,omitempty"`
-	OriginalModel        string `json:"original_model,omitempty"`
+	HostedVideoCost      *CostBreakdown `json:"hosted_video_cost,omitempty"`
+	Model                string         `json:"model"`
+	BillingModel         string         `json:"billing_model,omitempty"`
+	UpstreamModel        string         `json:"upstream_model,omitempty"`
+	VideoResolution      string         `json:"video_resolution,omitempty"`
+	VideoDurationSeconds int            `json:"video_duration_seconds,omitempty"`
+	OriginalModel        string         `json:"original_model,omitempty"`
 	// CreatedAt is when the gateway accepted the async create (RFC3339Nano UTC).
 	// duration_ms for deferred billing is measured from this instant until the
 	// first official done+video.url observation (status poll or content download),
@@ -457,10 +461,10 @@ func (s *OpenAIGatewayService) StoreGrokVideoPendingBilling(
 	pending.BillingModel = strings.TrimSpace(pending.BillingModel)
 	pending.UpstreamModel = strings.TrimSpace(pending.UpstreamModel)
 	pending.OriginalModel = strings.TrimSpace(pending.OriginalModel)
-	if pending.VideoResolution != "" {
+	if pending.VideoResolution != "" && pending.HostedVideoCost == nil {
 		pending.VideoResolution = NormalizeVideoBillingResolutionOrDefault(pending.VideoResolution)
 	}
-	if pending.VideoDurationSeconds > 0 {
+	if pending.VideoDurationSeconds > 0 && pending.HostedVideoCost == nil {
 		pending.VideoDurationSeconds = NormalizeVideoBillingDurationSecondsOrDefault(pending.VideoDurationSeconds)
 	}
 	// Always stamp create-accept time when missing so deferred duration_ms is E2E.
@@ -1215,6 +1219,9 @@ func grokMediaUsageFromResponse(endpoint GrokMediaEndpoint, requestInfo GrokMedi
 		meta.ImageCount = countOpenAIResponseImageOutputsFromJSONBytes(responseBody)
 		meta.ImageSize = requestInfo.SizeTier
 		meta.ImageInputSize = requestInfo.Size
+		if requestInfo.ImageResolution != "" {
+			meta.ImageInputSize = requestInfo.ImageResolution
+		}
 		meta.ImageOutputSizes = collectOpenAIResponseImageOutputSizesFromJSONBytes(responseBody)
 	case GrokMediaEndpointVideosGenerations, GrokMediaEndpointVideosEdits, GrokMediaEndpointVideosExtensions:
 		// Async video: capture request_id + create-time pricing params only.

@@ -204,7 +204,7 @@ func (s *AccountTestService) testCNProviderAdaptiveResponsesConnection(c *gin.Co
 		return s.sendErrorAndEnd(c, errMsg)
 	}
 
-	if err := s.processOpenAIStream(c, resp.Body); err != nil {
+	if err := s.processOpenAIStream(c, account, resp.Body); err != nil {
 		return err
 	}
 	s.sendEvent(c, TestEvent{Type: "status", Text: "已通过原生 /responses 验证"})

@@ -266,6 +266,51 @@ func TestRateLimitService_RecoverAccountAfterSuccessfulTest_NoRecoverableStateIs
 	require.Empty(t, cache.deletedIDs)
 }
 
+func TestRateLimitService_RecoverAccountAfterSuccessfulTest_PreservesActiveAccountCapacityCooldown(t *testing.T) {
+	until := time.Now().Add(20 * time.Minute)
+	repo := &rateLimitClearRepoStub{
+		getByIDAccount: &Account{
+			ID:                      199,
+			Status:                  StatusActive,
+			Schedulable:             true,
+			TempUnschedulableUntil:  &until,
+			TempUnschedulableReason: openAIAccountCapacityCooldownReasonPrefix + "Please retry later",
+		},
+	}
+	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+
+	result, err := svc.RecoverAccountAfterSuccessfulTest(context.Background(), 199)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.False(t, result.ClearedError)
+	require.False(t, result.ClearedRateLimit)
+	require.Equal(t, 1, repo.getByIDCalls)
+	require.Zero(t, repo.clearRateLimitCalls)
+	require.Zero(t, repo.clearTempUnschedCalls)
+}
+
+func TestRateLimitService_RecoverAccountAfterSuccessfulTest_ManualPauseRemainsPaused(t *testing.T) {
+	repo := &rateLimitClearRepoStub{
+		getByIDAccount: &Account{
+			ID:          8,
+			Status:      StatusActive,
+			Schedulable: false,
+			Extra:       map[string]any{},
+		},
+	}
+	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
+
+	result, err := svc.RecoverAccountAfterSuccessfulTest(context.Background(), 8)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.False(t, result.ClearedError)
+	require.False(t, result.ClearedRateLimit)
+	require.Equal(t, 0, repo.clearErrorCalls)
+	require.Equal(t, 0, repo.clearRateLimitCalls)
+	require.Equal(t, 0, repo.clearTempUnschedCalls)
+	require.False(t, repo.getByIDAccount.Schedulable)
+}
+
 func TestRateLimitService_RecoverAccountAfterSuccessfulTest_ClearErrorFailed(t *testing.T) {
 	repo := &rateLimitClearRepoStub{
 		getByIDAccount: &Account{

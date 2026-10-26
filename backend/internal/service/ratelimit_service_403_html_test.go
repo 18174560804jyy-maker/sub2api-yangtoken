@@ -178,7 +178,7 @@ func TestIsCloudflareBotBlockResponseOnlyMatches1010(t *testing.T) {
 	}
 }
 
-func TestHandleUpstreamError_AnthropicGenuine403StillPenalizes(t *testing.T) {
+func TestHandleUpstreamError_AnthropicAPIKey403UsesTemporaryCooldown(t *testing.T) {
 	repo := &rateLimitAccountRepoStub{}
 	svc := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
 	account := &Account{ID: 603, Platform: PlatformAnthropic, Type: AccountTypeAPIKey}
@@ -187,8 +187,9 @@ func TestHandleUpstreamError_AnthropicGenuine403StillPenalizes(t *testing.T) {
 		context.Background(), account, http.StatusForbidden, http.Header{},
 		[]byte(`{"error":{"type":"permission_error","message":"invalid API key"}}`),
 	))
-	require.Equal(t, 1, repo.setErrorCalls)
-	require.Contains(t, repo.lastErrorMsg, "invalid API key")
+	require.Equal(t, 0, repo.setErrorCalls, "API Key 403 不永久禁用账号")
+	require.Equal(t, 1, repo.tempCalls, "API Key 403 应进入临时冷却")
+	require.Contains(t, repo.lastTempReason, "invalid API key")
 }
 
 // 对照不变式：真正的结构化 JSON 403 是账号级证据，处罚链路必须原样保留。
@@ -222,8 +223,8 @@ func TestHandleUpstreamError_OpenAIStructured403StillPenalizes(t *testing.T) {
 	})
 }
 
-// 作用域守卫：放行只针对 OpenAI 平台。其他平台的 403 处理不受影响。
-func TestHandleUpstreamError_HTML403OnOtherPlatformsUnchanged(t *testing.T) {
+// API Key 的 HTML 403 也只能触发临时冷却，不能永久关闭账号。
+func TestHandleUpstreamError_HTML403OnAPIKeysUsesTemporaryCooldown(t *testing.T) {
 	for _, platform := range []string{PlatformAnthropic, PlatformGemini} {
 		t.Run(platform, func(t *testing.T) {
 			repo := &rateLimitAccountRepoStub{}
@@ -235,7 +236,8 @@ func TestHandleUpstreamError_HTML403OnOtherPlatformsUnchanged(t *testing.T) {
 			)
 
 			require.True(t, shouldDisable)
-			require.Equal(t, 1, repo.setErrorCalls, "其他平台保持原有 SetError 行为")
+			require.Equal(t, 0, repo.setErrorCalls, "API Key HTML 403 不得永久禁用账号")
+			require.Equal(t, 1, repo.tempCalls, "API Key HTML 403 应进入临时冷却")
 		})
 	}
 }

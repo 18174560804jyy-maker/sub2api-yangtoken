@@ -226,6 +226,30 @@ func (h *APIKeyHandler) Create(c *gin.Context) {
 	})
 }
 
+// EnsureCanvasMedia prepares a key for the authenticated user's canvas.
+func (h *APIKeyHandler) EnsureCanvasMedia(c *gin.Context) {
+	subject, ok := middleware2.GetAuthSubjectFromContext(c)
+	if !ok {
+		response.Unauthorized(c, "User not authenticated")
+		return
+	}
+	var req struct {
+		GroupID     int64 `json:"group_id" binding:"required,gt=0"`
+		PreferredID int64 `json:"preferred_id" binding:"gte=0"`
+	}
+	if err := c.ShouldBindJSON(&req); err != nil {
+		response.BadRequest(c, "Invalid media key request")
+		return
+	}
+	key, err := h.apiKeyService.EnsureCanvasMediaKey(c.Request.Context(), subject.UserID, req.GroupID, req.PreferredID, c.ClientIP())
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	response.Success(c, dto.APIKeyFromService(key).Localized(c.GetHeader("Accept-Language")))
+}
+
 // Update handles updating an API key
 // PUT /api/v1/api-keys/:id
 func (h *APIKeyHandler) Update(c *gin.Context) {

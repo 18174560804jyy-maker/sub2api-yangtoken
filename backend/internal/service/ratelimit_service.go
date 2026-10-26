@@ -94,6 +94,7 @@ const (
 	openAI403CooldownMinutesDefault = 10
 	openAI403DisableThreshold       = 3
 	openAI403CounterWindowMinutes   = 180
+	apiKey403CooldownMinutesDefault = 10
 )
 
 // NewRateLimitService 创建RateLimitService实例
@@ -362,6 +363,15 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 		}
 		s.handle529(ctx, account)
 		return false
+	}
+
+	// Explicit model-scoped rules must take precedence over the built-in
+	// model-not-found cooldown, which otherwise uses a longer fixed duration.
+	// Preserve Anthropic's native 429 window handling below.
+	if (statusCode != http.StatusTooManyRequests || account.Platform != PlatformAnthropic) &&
+		tempUnschedExplicitModelRuleApplies(account, statusCode, responseBody, firstRequestedModel(requestedModel)) &&
+		s.HandleTempUnschedulable(ctx, account, statusCode, responseBody, firstRequestedModel(requestedModel)) {
+		return true
 	}
 
 	if len(requestedModel) > 0 && s.HandleUpstreamModelNotFound(ctx, account, requestedModel[0], statusCode, responseBody) {
@@ -1004,7 +1014,8 @@ func buildForbiddenErrorMessage(prefix string, upstreamMsg string, responseBody 
 }
 
 // handle403 处理 403 Forbidden 错误。Cloudflare 1010 是请求/边缘级拦截，
-// 不应将其视为账号级故障；其他真实 403 继续按平台策略处理。
+// 不应将其视为账号级故障；中转 API Key 的 403 也可能是短暂计费或权限异常，
+// 因此不能据此永久关闭调度，其他真实 403 继续按平台策略处理。
 func (s *RateLimitService) handle403(ctx context.Context, account *Account, upstreamMsg string, responseBody []byte) (shouldDisable bool) {
 	if isCloudflareBotBlockResponse(responseBody) {
 		slog.Warn(
@@ -1040,7 +1051,22 @@ func (s *RateLimitService) handle403(ctx context.Context, account *Account, upst
 	if account.Platform == PlatformOpenAI || account.IsMultiProtocolAPIKey() {
 		return s.handleOpenAI403(ctx, account, upstreamMsg, responseBody)
 	}
-	// 非 Antigravity 平台：保持原有行为
+	if account.Type == AccountTypeAPIKey {
+		msg := buildForbiddenErrorMessage(
+			"API key 403 temporary cooldown:",
+			upstreamMsg,
+			responseBody,
+			"upstream temporarily rejected the request",
+		)
+		until := time.Now().Add(time.Duration(apiKey403CooldownMinutesDefault) * time.Minute)
+		s.notifyAccountSchedulingBlocked(account, until, "api_key_403_temp")
+		if err := s.accountRepo.SetTempUnschedulable(ctx, account.ID, until, msg); err != nil {
+			slog.Warn("api_key_403_set_temp_unschedulable_failed", "account_id", account.ID, "error", err)
+		}
+		slog.Warn("api_key_403_temp_unschedulable", "account_id", account.ID, "until", until, "error", msg)
+		return true
+	}
+
 	msg := buildForbiddenErrorMessage(
 		"Access forbidden (403):",
 		upstreamMsg,
@@ -2219,7 +2245,11 @@ func (s *RateLimitService) RecoverAccountState(ctx context.Context, accountID in
 	if err != nil {
 		return nil, err
 	}
+	return s.recoverAccountState(ctx, account, options)
+}
 
+func (s *RateLimitService) recoverAccountState(ctx context.Context, account *Account, options AccountRecoveryOptions) (*SuccessfulTestRecoveryResult, error) {
+	accountID := account.ID
 	result := &SuccessfulTestRecoveryResult{}
 	if account.Status == StatusError {
 		if err := s.accountRepo.ClearError(ctx, accountID); err != nil {
@@ -2252,7 +2282,14 @@ func (s *RateLimitService) RecoverAccountState(ctx context.Context, accountID in
 // RecoverAccountAfterSuccessfulTest 将一次成功测试视为正常请求，
 // 按需恢复 error / rate-limit / overload / temp-unsched / model-rate-limit 等运行时状态。
 func (s *RateLimitService) RecoverAccountAfterSuccessfulTest(ctx context.Context, accountID int64) (*SuccessfulTestRecoveryResult, error) {
-	return s.RecoverAccountState(ctx, accountID, AccountRecoveryOptions{})
+	account, err := s.accountRepo.GetByID(ctx, accountID)
+	if err != nil {
+		return nil, err
+	}
+	if isOpenAIAccountCapacityCooldownActive(account, time.Now()) {
+		return &SuccessfulTestRecoveryResult{}, nil
+	}
+	return s.recoverAccountState(ctx, account, AccountRecoveryOptions{})
 }
 
 func (s *RateLimitService) ClearTempUnschedulable(ctx context.Context, accountID int64) error {
@@ -2649,6 +2686,23 @@ func tempUnschedRulesApply(account *Account, statusCode int, responseBody []byte
 	}
 	matches := matchTempUnschedulableRules(account, statusCode, responseBody)
 	return len(matches) > 0 && tempUnschedHitUsesModelScope(account, matches[0].rule, modelKey, statusCode, responseBody)
+}
+
+// tempUnschedExplicitModelRuleApplies is used by fast paths that otherwise
+// classify a failure as request-scoped. Only an administrator rule that
+// explicitly declares model scope may override that classification; legacy
+// rules without scope keep their historical behavior.
+func tempUnschedExplicitModelRuleApplies(account *Account, statusCode int, responseBody []byte, modelKey string) bool {
+	matches := matchTempUnschedulableRules(account, statusCode, responseBody)
+	if statusCode == http.StatusUnauthorized && len(matches) > 1 {
+		matches = matches[:1]
+	}
+	for _, match := range matches {
+		if match.rule.Scope == TempUnschedScopeModel && tempUnschedHitUsesModelScope(account, match.rule, modelKey, statusCode, responseBody) {
+			return true
+		}
+	}
+	return false
 }
 
 // tempUnschedHitUsesModelScope 决定一次命中是否按模型级冷却：凭据级 401 始终按账号处理，

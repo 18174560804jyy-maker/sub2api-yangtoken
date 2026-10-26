@@ -87,6 +87,22 @@ export default {
     copyCodeFailed: 'Failed'
   },
 
+  pricing: {
+    title: 'Model Pricing',
+    description: 'Chinese models · CNY / million tokens',
+    search: 'Search model or provider',
+    provider: 'Provider',
+    model: 'Model',
+    providerColumn: 'Supplier',
+    official: 'Official price',
+    ourSelling: 'Our price',
+    ourMultiple: 'Our / official',
+    updatedAt: 'Updated {time}',
+    unitHint: 'Prices are in CNY / million tokens; multiple = selling price ÷ official price.',
+    empty: 'No matching models',
+    loadFailed: 'Failed to load pricing'
+  },
+
   // Announcements Page
   announcements: {
     title: 'Announcements',

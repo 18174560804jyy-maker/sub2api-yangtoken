@@ -71,6 +71,9 @@ type openAIAccountTestRepo struct {
 	clearedErrorID     int64
 	setErrorID         int64
 	setErrorMsg        string
+	tempUnschedID      int64
+	tempUnschedUntil   time.Time
+	tempUnschedReason  string
 }
 
 func (r *openAIAccountTestRepo) UpdateExtra(_ context.Context, _ int64, updates map[string]any) error {
@@ -99,6 +102,44 @@ func (r *openAIAccountTestRepo) SetError(_ context.Context, id int64, errorMsg s
 	r.setErrorID = id
 	r.setErrorMsg = errorMsg
 	return nil
+}
+
+func (r *openAIAccountTestRepo) SetTempUnschedulable(_ context.Context, id int64, until time.Time, reason string) error {
+	r.tempUnschedID = id
+	r.tempUnschedUntil = until
+	r.tempUnschedReason = reason
+	return nil
+}
+
+func TestAccountTestService_AnthropicAPIKey403UsesTemporaryCooldown(t *testing.T) {
+	ctx, _ := newTestContext()
+	repo := &openAIAccountTestRepo{}
+	upstream := &queuedHTTPUpstream{responses: []*http.Response{
+		newJSONResponse(http.StatusForbidden, `{"error":{"message":"Insufficient account balance"}}`),
+	}}
+	svc := &AccountTestService{
+		accountRepo:  repo,
+		httpUpstream: upstream,
+		cfg:          &config.Config{Security: config.SecurityConfig{URLAllowlist: config.URLAllowlistConfig{Enabled: false}}},
+	}
+	account := &Account{
+		ID:          208,
+		Platform:    PlatformAnthropic,
+		Type:        AccountTypeAPIKey,
+		Concurrency: 1,
+		Credentials: map[string]any{
+			"api_key":  "test-key",
+			"base_url": "https://relay.example.com",
+		},
+	}
+
+	err := svc.testClaudeAccountConnection(ctx, account, "claude-sonnet-5")
+
+	require.Error(t, err)
+	require.Zero(t, repo.setErrorID)
+	require.Equal(t, account.ID, repo.tempUnschedID)
+	require.True(t, repo.tempUnschedUntil.After(time.Now()))
+	require.Contains(t, repo.tempUnschedReason, "Insufficient account balance")
 }
 
 func TestAccountTestService_OpenAISuccessPersistsSnapshotFromHeaders(t *testing.T) {
@@ -135,6 +176,55 @@ func TestAccountTestService_OpenAISuccessPersistsSnapshotFromHeaders(t *testing.
 	require.Equal(t, 42.0, repo.updatedExtra["codex_5h_used_percent"])
 	require.Equal(t, 88.0, repo.updatedExtra["codex_7d_used_percent"])
 	require.Contains(t, recorder.Body.String(), "test_complete")
+}
+
+func TestAccountTestService_OpenAICapacityFailureDoesNotImmediatelyUnschedule(t *testing.T) {
+	ctx, _ := newTestContext()
+	repo := &openAIAccountTestRepo{}
+	svc := &AccountTestService{accountRepo: repo}
+	account := &Account{ID: 195, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Name: "GPT-PRO(sl)"}
+	body := strings.NewReader(strings.Join([]string{
+		`data: {"type":"response.created","response":{"id":"resp_1"}}`,
+		"",
+		`data: {"type":"error","error":{"code":"server_is_overloaded","message":"Our servers are currently overloaded. Please try again later."}}`,
+		"",
+		`data: {"type":"response.failed","response":{"error":{"message":"Our servers are currently overloaded. Please try again later."}}}`,
+		"",
+	}, "\n"))
+
+	err := svc.processOpenAIStream(ctx, account, body)
+
+	require.Error(t, err)
+	require.Zero(t, repo.tempUnschedID)
+	require.Contains(t, err.Error(), "Our servers are currently overloaded")
+}
+
+func TestAccountTestService_OpenAICapacityCodeWithoutMessageIsNormalized(t *testing.T) {
+	ctx, recorder := newTestContext()
+	repo := &openAIAccountTestRepo{}
+	svc := &AccountTestService{accountRepo: repo}
+	account := &Account{ID: 199, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	body := strings.NewReader("data: {\"type\":\"error\",\"error\":{\"code\":\"server_is_overloaded\"}}\n\n")
+
+	err := svc.processOpenAIStream(ctx, account, body)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "Our servers are currently overloaded")
+	require.Contains(t, recorder.Body.String(), "Our servers are currently overloaded")
+	require.Zero(t, repo.tempUnschedID)
+}
+
+func TestAccountTestService_OpenAISlowDownDoesNotTempUnscheduleAccount(t *testing.T) {
+	ctx, _ := newTestContext()
+	repo := &openAIAccountTestRepo{}
+	svc := &AccountTestService{accountRepo: repo}
+	account := &Account{ID: 195, Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	body := strings.NewReader("data: {\"type\":\"response.failed\",\"response\":{\"error\":{\"code\":\"slow_down\",\"message\":\"Please retry later.\"}}}\n\n")
+
+	err := svc.processOpenAIStream(ctx, account, body)
+
+	require.Error(t, err)
+	require.Zero(t, repo.tempUnschedID)
 }
 
 func TestAccountTestService_OpenAIOAuthTestNormalizesGPT56Alias(t *testing.T) {

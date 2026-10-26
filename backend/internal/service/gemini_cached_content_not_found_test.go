@@ -106,7 +106,7 @@ func TestGeminiForwardNative_CachedContentNotFoundBypassesTempUnschedulableRules
 	require.Equal(t, http.StatusForbidden, rec.Code)
 }
 
-func TestGeminiForwardNative_OtherForbiddenStillPenalizesAccount(t *testing.T) {
+func TestGeminiForwardNative_OtherForbiddenTemporarilyUnschedulesAPIKey(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	body := `{"error":{"code":403,"message":"Your project has been denied access. Please contact support.","status":"PERMISSION_DENIED"}}`
 	svc, _, repo := newGeminiCachedContentTestService(http.StatusForbidden, body)
@@ -116,8 +116,9 @@ func TestGeminiForwardNative_OtherForbiddenStillPenalizesAccount(t *testing.T) {
 		"gemini-3.8-flash", "generateContent", false, []byte(geminiCachedContentRequestBody))
 
 	var failoverErr *UpstreamFailoverError
-	require.True(t, errors.As(err, &failoverErr), "其他 403 仍按账号问题换号")
-	require.Equal(t, 1, repo.setErrCalls, "其他 403 仍标记账号错误")
+	require.True(t, errors.As(err, &failoverErr), "其他 403 暂时停调度并换号")
+	require.Equal(t, 0, repo.setErrCalls, "API Key 403 不永久标记账号错误")
+	require.Equal(t, 1, repo.tempCalls, "其他 403 应进入临时冷却")
 }
 
 // Vertex 对已删除 / 已过期缓存的响应（2026-10 实测）：生成请求 400，缓存资源接口 404，文案含上游缓存数字 ID。

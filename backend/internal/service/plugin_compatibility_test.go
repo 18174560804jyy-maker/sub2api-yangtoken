@@ -42,7 +42,20 @@ func TestEvaluatePluginCompatibilityRejectsProtocolMismatch(t *testing.T) {
 func TestMatchesSemverRange(t *testing.T) {
 	assert.True(t, matchesSemverRange("0.1.179", ">=0.1.170, <0.2.0"))
 	assert.True(t, matchesSemverRange("v1.2.3", "=1.2.3"))
+	assert.True(t, matchesSemverRange("0.2.7.1-yangtoken", ">=0.2.7 <0.3.0"))
 	assert.False(t, matchesSemverRange("0.1.169", ">=0.1.170 <0.2.0"))
 	assert.False(t, matchesSemverRange("dev", ">=0.1.0"))
 	assert.False(t, matchesSemverRange("0.1.179", "^0.1.0"))
+}
+
+func TestEvaluatePluginCompatibilityTreatsLegacyCustomBuildAsUntested(t *testing.T) {
+	manifest := testPluginManifest(nil)
+	manifest.Requires.Sub2API = ">=0.2.7 <0.3.0"
+	manifest.Requires.TestedSub2APIVersions = []string{"0.2.7"}
+
+	result := EvaluatePluginCompatibility(manifest, PluginHostInfo{Version: "0.2.7.1-yangtoken"})
+
+	require.True(t, result.Compatible)
+	assert.False(t, result.Tested)
+	assert.Equal(t, "untested", result.Status)
 }
