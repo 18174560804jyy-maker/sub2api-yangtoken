@@ -26,7 +26,7 @@ func TestPublicPricingUsesGroupMultiplierAndHidesSupplierPrices(t *testing.T) {
 	svc := &DownstreamPricingSyncService{repo: publicPricingTestRepository{
 		config: &DownstreamPricingConfig{
 			GroupMultiplier: .3,
-			MarkupPercent: 100,
+			MarkupPercent:   100,
 			Snapshot: []DownstreamUpstreamModel{
 				{Model: "automatic", Official: DownstreamPriceSet{Input: 1, Output: 4, CacheRead: .02}, Selling: DownstreamPriceSet{Input: .08, Output: .32, CacheRead: .0016}},
 				{Model: "manual", Official: DownstreamPriceSet{Input: 2}, Selling: DownstreamPriceSet{Input: .1}},

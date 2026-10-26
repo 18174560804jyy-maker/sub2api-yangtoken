@@ -368,7 +368,7 @@ func (s *RateLimitService) HandleUpstreamError(ctx context.Context, account *Acc
 	// Explicit model-scoped rules must take precedence over the built-in
 	// model-not-found cooldown, which otherwise uses a longer fixed duration.
 	// Preserve Anthropic's native 429 window handling below.
-	if !(statusCode == http.StatusTooManyRequests && account.Platform == PlatformAnthropic) &&
+	if (statusCode != http.StatusTooManyRequests || account.Platform != PlatformAnthropic) &&
 		tempUnschedExplicitModelRuleApplies(account, statusCode, responseBody, firstRequestedModel(requestedModel)) &&
 		s.HandleTempUnschedulable(ctx, account, statusCode, responseBody, firstRequestedModel(requestedModel)) {
 		return true
