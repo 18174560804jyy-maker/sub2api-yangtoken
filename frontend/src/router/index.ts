@@ -167,17 +167,6 @@ const routes: RouteRecordRaw[] = [
     }
   },
   {
-    path: '/pricing',
-    name: 'PublicPricing',
-    component: () => import('@/views/user/PublicPricingView.vue'),
-    meta: {
-      requiresAuth: true,
-      requiresAdmin: false,
-      title: 'Pricing',
-      titleKey: 'pricing.title'
-    }
-  },
-  {
     path: '/legal/:documentId',
     name: 'LegalDocument',
     component: () => import('@/views/public/LegalDocumentView.vue'),
@@ -395,10 +384,6 @@ const routes: RouteRecordRaw[] = [
       title: 'Payment',
       requiresPayment: false
     }
-  },
-  {
-    path: '/custom/yangtoken-pricing',
-    redirect: '/pricing'
   },
   {
     path: '/custom/:id',
