@@ -58,6 +58,35 @@ function mountTable(
 }
 
 describe('PlazaModelPricingTable', () => {
+  it('shows domestic references in CNY while keeping paid prices in USD without links', () => {
+    const model = tokenModel({
+      name: 'kimi-k3',
+      official_pricing: {
+        currency: 'CNY', input_price: 20e-6, output_price: 100e-6,
+        cache_write_price: 0, cache_read_price: 2e-6
+      }
+    })
+    const wrapper = mountTable([model], 0.3)
+    const cells = wrapper.findAll('tbody tr td')
+    expect(cells[1].text()).toContain('$0.90')
+    expect(cells[4].text()).toBe('¥20.00')
+    expect(cells[5].text()).toBe('¥100.00')
+    expect(cells[6].text()).toContain('¥0.00')
+    expect(cells[6].text()).toContain('¥2.00')
+    expect(cells[6].text()).not.toContain('1h')
+    expect(wrapper.find('thead').text()).toContain('¥ (CNY) / 1M token')
+    expect(wrapper.findAll('a')).toHaveLength(0)
+    wrapper.unmount()
+  })
+
+  it('labels mixed reference currencies explicitly', () => {
+    const cny = tokenModel()
+    cny.official_pricing!.currency = 'CNY'
+    const wrapper = mountTable([cny, tokenModel({ name: 'usd-model' })], 1)
+    expect(wrapper.find('thead').text()).toContain('$ (USD) / ¥ (CNY) / 1M token')
+    wrapper.unmount()
+  })
+
   it.each([
     ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-sol', 'gpt-5.6-sol', 'gpt-5.6-terra'],
     ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-pro-preview'],

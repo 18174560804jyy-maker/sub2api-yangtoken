@@ -7,11 +7,10 @@ import (
 	"strings"
 )
 
-// PlazaOfficialPricing 模型广场展示用的官方参考价（USD per token）。
-// 优先使用计费目录；目录缺失时可使用仅供展示的官方价卡。nil 表示缺失。
+// PlazaOfficialPricing 展示参考价（per token，Currency 为空时为 USD）。
+// 国模使用独立人民币参考价，其余使用计费目录。nil 表示缺失。
 type PlazaOfficialPricing struct {
-	SourceURL         string
-	SourceNote        string
+	Currency          string
 	InputPrice        *float64
 	OutputPrice       *float64
 	CacheWritePrice   *float64 // 5m 缓存写入（= LiteLLM cache_creation）
@@ -346,15 +345,19 @@ func plazaImageDisplayPricing(p *ChannelModelPricing, g *Group) *ChannelModelPri
 	return &clone
 }
 
-// lookupOfficialPricing 查询模型的官方参考价（与计费同源：LiteLLM → 内置兜底 → 模型策略），
+// lookupOfficialPricing 查询模型的参考价（国模展示价优先，其余使用计费目录），
 // 带 memo 避免同名模型重复解析。官方阶梯按无分组、无渠道的口径查阶梯表。
-// billingService 为 nil（测试场景）或查不到时返回 nil。
+// 没有国模参考价且 billingService 不可用或查不到时返回 nil。
 func (s *ModelPlazaService) lookupOfficialPricing(ctx context.Context, modelName string, memo map[string]*PlazaOfficialPricing) *PlazaOfficialPricing {
-	if s.billingService == nil {
-		return nil
-	}
 	if cached, ok := memo[modelName]; ok {
 		return cached
+	}
+	if reference := plazaOfficialReference(modelName); reference != nil {
+		memo[modelName] = reference
+		return reference
+	}
+	if s.billingService == nil {
+		return nil
 	}
 	var result *PlazaOfficialPricing
 	if mp, err := s.billingService.GetModelPricing(modelName); err == nil && mp != nil {
@@ -378,9 +381,6 @@ func (s *ModelPlazaService) lookupOfficialPricing(ctx context.Context, modelName
 			result.CacheWrite1hPrice == nil && result.CacheReadPrice == nil && len(result.Intervals) == 0 {
 			result = nil
 		}
-	}
-	if result == nil {
-		result = plazaOfficialReferenceFallback(modelName)
 	}
 	memo[modelName] = result
 	return result

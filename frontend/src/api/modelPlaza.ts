@@ -7,10 +7,9 @@
 import { apiClient } from './client'
 import type { UserPricingInterval, UserSupportedModelPricing } from './channels'
 
-/** 官方参考价（USD per token，与计费目录同源；字段缺失 = 目录未覆盖）。 */
+/** 展示参考价（per token，默认 USD；国模参考价为 CNY）。 */
 export interface PlazaOfficialPricing {
-  source_url?: string
-  source_note?: string
+  currency?: 'USD' | 'CNY'
   input_price: number | null
   output_price: number | null
   /** 5m 缓存写入（= LiteLLM cache_creation）。 */
