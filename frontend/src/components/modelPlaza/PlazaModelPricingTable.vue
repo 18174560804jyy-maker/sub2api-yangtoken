@@ -389,10 +389,25 @@ const preferredModelOrder = new Map([
   'gemini-3.1-pro-preview'
 ].map((name, index) => [name, index]))
 
+const domesticVendorOrder = [
+  /^kimi-/i,
+  /^qwen(?:\d|-)/i,
+  /^glm-/i,
+  /^(?:hy\d|hunyuan-)/i,
+  /^deepseek-/i,
+  /^mimo-/i,
+  /^minimax-/i
+]
+
+function domesticVendorRank(name: string): number {
+  const rank = domesticVendorOrder.findIndex(pattern => pattern.test(name))
+  return rank < 0 ? domesticVendorOrder.length : rank
+}
+
 /**
  * 展示顺序:
  * 1. token 计费的排在前,按图/按次计费的沉到末尾——它们的官方 token 价与实付的按张/按次价不同量纲,混排无意义;
- * 2. 已指定顺序的模型优先,其余按官方输出价从高到低,无官方价的排最后;
+ * 2. 已指定顺序的模型优先,国模按厂家相邻排列,厂家内部及其余模型按官方输出价从高到低,无官方价的排最后;
  * 3. 同价按名称降序(新版本号在前,如 gpt-5.6 先于 gpt-5.5)。
  */
 const sortedModels = computed(() => {
@@ -403,6 +418,8 @@ const sortedModels = computed(() => {
     const preferred = (preferredModelOrder.get(a.name) ?? preferredModelOrder.size) -
       (preferredModelOrder.get(b.name) ?? preferredModelOrder.size)
     if (preferred !== 0) return preferred
+    const vendor = domesticVendorRank(a.name) - domesticVendorRank(b.name)
+    if (vendor !== 0) return vendor
     const pa = a.official_pricing?.output_price ?? null
     const pb = b.official_pricing?.output_price ?? null
     if (pa != null && pb != null && pa !== pb) return pb - pa

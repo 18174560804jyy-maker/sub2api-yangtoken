@@ -87,6 +87,41 @@ describe('PlazaModelPricingTable', () => {
     wrapper.unmount()
   })
 
+  it('keeps domestic vendors adjacent while retaining price and version order within each vendor', () => {
+    const catalog: [string, number][] = [
+      ['kimi-k3', 100], ['kimi-k3.1-pro', 68],
+      ['qwen3.8-max', 36], ['qwen3.7-max', 36], ['qwen3.8-flash', 2.7],
+      ['glm-5.3', 28], ['glm-5.3-flashx', 7], ['glm-5.3-flash', 3.35],
+      ['hy4-preview', 18], ['hy3', 4],
+      ['deepseek-v4-pro-0813', 13.5], ['deepseek-v4.1-flash', 4],
+      ['mimo-v2.6-pro', 8.7], ['mimo-v2.6-flash', 4],
+      ['minimax-m3', 8.4], ['minimax-m3.1-flash', 4]
+    ]
+    const models = catalog.map(([name, output]) => tokenModel({
+      name, platform: 'openai',
+      official_pricing: {
+        currency: 'CNY', input_price: 1e-6, output_price: output * 1e-6,
+        cache_write_price: 0, cache_read_price: 0
+      }
+    })).reverse()
+    const before = JSON.stringify(models)
+    const wrapper = mountTable(models, 0.3)
+    expect(wrapper.findAll('tbody tr').map(row => row.find('td').text()))
+      .toEqual(catalog.map(([name]) => name))
+    expect(JSON.stringify(models)).toBe(before)
+    wrapper.unmount()
+  })
+
+  it('groups new family members and missing references without treating unrelated names as domestic', () => {
+    const names = ['hybrid-model', 'qwen3.8-flash', 'GLM-new-model', 'hy3', 'glm-5.3', 'Qwen-new-model']
+    const models = names.map(name => tokenModel({ name, official_pricing: null }))
+    const wrapper = mountTable(models, 0.3)
+    expect(wrapper.findAll('tbody tr').map(row => row.find('td').text())).toEqual([
+      'qwen3.8-flash', 'Qwen-new-model', 'GLM-new-model', 'glm-5.3', 'hy3', 'hybrid-model'
+    ])
+    wrapper.unmount()
+  })
+
   it.each([
     ['gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-sol', 'gpt-5.6-sol', 'gpt-5.6-terra'],
     ['gemini-3.8-flash', 'gemini-3.6-flash', 'gemini-3.5-flash-lite', 'gemini-3.1-pro-preview'],
