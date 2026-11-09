@@ -144,6 +144,28 @@ describe('PlazaModelPricingTable', () => {
     })
     expect(wrapper.text()).toContain('720p')
     expect(wrapper.text()).toContain('$1.00')
+    expect(wrapper.text()).toContain('modelPlaza.table.perSecond')
+    expect(wrapper.text()).toContain('modelPlaza.table.perUnitSecond')
+    expect(wrapper.text()).not.toContain('modelPlaza.table.perUnitRequest')
+    wrapper.unmount()
+  })
+
+  it('shows all Grok video resolutions at the independent per-second price', () => {
+    const model = tokenModel({ name: 'grok-imagine-video-1.5', official_pricing: null })
+    model.pricing!.billing_mode = 'video'
+    model.pricing!.intervals = ['480p', '720p', '1080p'].map(tier_label => ({
+      min_tokens: 0, max_tokens: null, tier_label,
+      input_price: null, output_price: null, cache_write_price: null,
+      cache_read_price: null, per_request_price: 0.15
+    }))
+    const wrapper = mountTable([model], 0.2, 0.1, {
+      videoRateIndependent: true, videoRateMultiplier: 1
+    })
+    const cells = wrapper.findAll('tbody tr td')
+    expect(cells[1].attributes('colspan')).toBe('3')
+    expect(cells[1].text().match(/\$0\.15/g)).toHaveLength(3)
+    for (const resolution of ['480p', '720p', '1080p']) expect(cells[1].text()).toContain(resolution)
+    expect(cells.at(-1)!.text()).toBe('1x')
     wrapper.unmount()
   })
 

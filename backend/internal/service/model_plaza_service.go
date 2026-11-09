@@ -234,11 +234,15 @@ func (s *ModelPlazaService) ListGroups(ctx context.Context) ([]PlazaGroup, error
 func (s *ModelPlazaService) fillDisplayPricing(ctx context.Context, m *PlazaModel, g *Group) {
 	if groupPricing := matchGroupModelPricing(g, m.Name); groupPricing != nil {
 		m.Pricing = groupPricing
-		// 分组模型级固定价就是实收价，不能再被分组图片兜底档位覆盖。
-		// 否则模型广场会显示 image_price_1k/2k/4k，而实际按 model_pricing 扣费。
-		if groupPricing.BillingMode == BillingModeImage || groupPricing.BillingMode == BillingModePerRequest {
+		// 分组模型级固定价就是实收价，不能再被分组媒体兜底档位覆盖。
+		// 否则模型广场会显示媒体兜底价，而实际按 model_pricing 扣费。
+		if groupPricing.BillingMode == BillingModeImage || groupPricing.BillingMode == BillingModePerRequest || groupPricing.BillingMode == BillingModeVideo {
 			return
 		}
+	}
+	if videoPricing := s.plazaGrokVideoDisplayPricing(m, g); videoPricing != nil {
+		m.Pricing = videoPricing
+		return
 	}
 	if s.billingService != nil && s.resolver != nil {
 		sched, err := s.billingService.ResolveContextPricingSchedule(ctx, s.resolver, ContextPricingScheduleInput{
@@ -256,6 +260,37 @@ func (s *ModelPlazaService) fillDisplayPricing(ctx context.Context, m *PlazaMode
 		}
 	}
 	m.Pricing = plazaImageDisplayPricing(m.Pricing, g)
+}
+
+// plazaGrokVideoDisplayPricing fills mapping-only/token catalog entries from
+// the existing video billing rate card. Explicit channel media prices remain
+// on their existing path; this only creates detached display data.
+func (s *ModelPlazaService) plazaGrokVideoDisplayPricing(m *PlazaModel, g *Group) *ChannelModelPricing {
+	if s.billingService == nil || !isGrokVideoBillingModel(m.Name) {
+		return nil
+	}
+	if p := m.Pricing; p != nil && p.BillingMode != "" && p.BillingMode != BillingModeToken {
+		return nil
+	}
+	family := CanonicalGrokImagineVideoPriceFamily(m.Name)
+	if family != VideoPriceFamilyGrokImagineVideo && family != VideoPriceFamilyGrokImagineVideo15 {
+		return nil
+	}
+	resolutions := []string{VideoBillingResolution480P, VideoBillingResolution720P}
+	if family == VideoPriceFamilyGrokImagineVideo15 {
+		resolutions = append(resolutions, VideoBillingResolution1080P)
+	}
+	pricing := &ChannelModelPricing{
+		Platform: m.Platform, Models: []string{m.Name}, BillingMode: BillingModeVideo,
+	}
+	config := g.VideoPriceConfig()
+	for i, resolution := range resolutions {
+		price := s.billingService.getVideoUnitPrice(m.Name, resolution, config)
+		pricing.Intervals = append(pricing.Intervals, PricingInterval{
+			TierLabel: resolution, PerRequestPrice: &price, SortOrder: i,
+		})
+	}
+	return pricing
 }
 
 // plazaPricingFromSchedule 把阶梯表压成展示用的 ChannelModelPricing：
