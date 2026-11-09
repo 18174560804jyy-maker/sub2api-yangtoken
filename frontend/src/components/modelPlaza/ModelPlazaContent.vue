@@ -48,7 +48,7 @@
         @update:search="searchQuery = $event"
       />
 
-      <!-- 分组分节的模型清单(默认按生效倍率升序) -->
+      <!-- 分组分节的模型清单(按平台归类,平台内按生效倍率升序) -->
       <div v-if="filteredGroups.length > 0" class="space-y-5">
         <PlazaGroupSection v-for="g in filteredGroups" :key="g.id" :group="g" />
       </div>
@@ -103,12 +103,29 @@ function effectiveRate(g: ModelPlazaGroup): number {
   return g.user_rate_multiplier ?? g.rate_multiplier
 }
 
+const platformOrder = ['openai', 'anthropic', 'gemini', 'grok']
+
+function comparePlatforms(a: string, b: string): number {
+  const rank = (p: string) => {
+    const index = platformOrder.indexOf(p)
+    return index < 0 ? platformOrder.length : index
+  }
+  return rank(a) - rank(b) || a.localeCompare(b)
+}
+
+const orderedGroups = computed(() =>
+  [...(props.response?.groups ?? [])].sort((a, b) =>
+    comparePlatforms(a.platform, b.platform) ||
+    effectiveRate(a) - effectiveRate(b) || a.name.localeCompare(b.name) || a.id - b.id
+  )
+)
+
 const platforms = computed(() =>
-  [...new Set((props.response?.groups ?? []).map((g) => g.platform).filter(Boolean))].sort()
+  [...new Set(orderedGroups.value.map((g) => g.platform).filter(Boolean))]
 )
 
 const groupOptions = computed(() =>
-  (props.response?.groups ?? []).map((g) => ({
+  orderedGroups.value.map((g) => ({
     id: g.id,
     name: g.name,
     platform: g.platform,
@@ -129,7 +146,7 @@ watch(rates, (list) => {
 })
 
 const filteredGroups = computed(() => {
-  let groups = props.response?.groups ?? []
+  let groups = orderedGroups.value
   if (selectedPlatform.value !== 'all') {
     groups = groups.filter((g) => g.platform === selectedPlatform.value)
   }
@@ -146,10 +163,7 @@ const filteredGroups = computed(() => {
       .map((g) => ({ ...g, models: g.models.filter((m) => m.name.toLowerCase().includes(q)) }))
       .filter((g) => g.models.length > 0)
   }
-  // 专属倍率会改变生效值,不能只依赖后端按默认倍率的排序。
-  return [...groups].sort(
-    (a, b) => effectiveRate(a) - effectiveRate(b) || a.name.localeCompare(b.name)
-  )
+  return groups
 })
 </script>
 

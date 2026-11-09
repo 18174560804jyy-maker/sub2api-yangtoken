@@ -38,6 +38,8 @@ func NewModelPlazaHandler(
 
 // modelPlazaOfficialPricing 官方参考价（USD per token，与计费目录同源）。
 type modelPlazaOfficialPricing struct {
+	SourceURL         string   `json:"source_url,omitempty"`
+	SourceNote        string   `json:"source_note,omitempty"`
 	InputPrice        *float64 `json:"input_price"`
 	OutputPrice       *float64 `json:"output_price"`
 	CacheWritePrice   *float64 `json:"cache_write_price"`
@@ -257,6 +259,8 @@ func toModelPlazaOfficialPricing(p *service.PlazaOfficialPricing) *modelPlazaOff
 		return nil
 	}
 	return &modelPlazaOfficialPricing{
+		SourceURL:         p.SourceURL,
+		SourceNote:        p.SourceNote,
 		InputPrice:        p.InputPrice,
 		OutputPrice:       p.OutputPrice,
 		CacheWritePrice:   p.CacheWritePrice,

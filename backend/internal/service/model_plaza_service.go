@@ -7,9 +7,11 @@ import (
 	"strings"
 )
 
-// PlazaOfficialPricing 模型广场展示用的官方参考价（USD per token），与计费同源：
-// LiteLLM → 内置兜底价卡 → 模型策略。字段为 nil 表示该项缺失（0 视为未配置）。
+// PlazaOfficialPricing 模型广场展示用的官方参考价（USD per token）。
+// 优先使用计费目录；目录缺失时可使用仅供展示的官方价卡。nil 表示缺失。
 type PlazaOfficialPricing struct {
+	SourceURL         string
+	SourceNote        string
 	InputPrice        *float64
 	OutputPrice       *float64
 	CacheWritePrice   *float64 // 5m 缓存写入（= LiteLLM cache_creation）
@@ -376,6 +378,9 @@ func (s *ModelPlazaService) lookupOfficialPricing(ctx context.Context, modelName
 			result.CacheWrite1hPrice == nil && result.CacheReadPrice == nil && len(result.Intervals) == 0 {
 			result = nil
 		}
+	}
+	if result == nil {
+		result = plazaOfficialReferenceFallback(modelName)
 	}
 	memo[modelName] = result
 	return result

@@ -223,6 +223,14 @@
               </div>
             </template>
             <template v-else>{{ official(m.official_pricing?.input_price) }}</template>
+            <a
+              v-if="m.official_pricing?.source_url"
+              :href="m.official_pricing.source_url"
+              :title="m.official_pricing.source_note"
+              target="_blank"
+              rel="noopener noreferrer"
+              class="mt-1 block font-sans text-[10px] underline decoration-dotted underline-offset-2"
+            >{{ t('modelPlaza.table.officialPrice') }}</a>
           </td>
           <td class="px-3 py-2.5 align-middle font-mono text-xs text-gray-500 dark:text-dark-400">
             <template v-if="officialIntervals(m).length">
@@ -360,10 +368,33 @@ const accentStyle = computed(() => ({ '--plaza-accent': platformAccentColor(prop
 
 const PER_MILLION = 1_000_000
 
+const preferredModelOrder = new Map([
+  'gpt-6-astra',
+  'gpt-6.1-sol',
+  'gpt-6.1-terra',
+  'gpt-6-sol',
+  'gpt-5.6-sol',
+  'gpt-5.6-terra',
+  'claude-fable-5-1',
+  'claude-fable-5',
+  'claude-opus-5-5',
+  'claude-opus-5',
+  'claude-opus-4-8',
+  'claude-opus-4-7',
+  'claude-opus-4-6',
+  'claude-sonnet-5-5',
+  'claude-sonnet-5',
+  'claude-haiku-5-5',
+  'gemini-3.8-flash',
+  'gemini-3.6-flash',
+  'gemini-3.5-flash-lite',
+  'gemini-3.1-pro-preview'
+].map((name, index) => [name, index]))
+
 /**
  * 展示顺序:
  * 1. token 计费的排在前,按图/按次计费的沉到末尾——它们的官方 token 价与实付的按张/按次价不同量纲,混排无意义;
- * 2. 组内按官方输出价从高到低,无官方价的排最后;
+ * 2. 已指定顺序的模型优先,其余按官方输出价从高到低,无官方价的排最后;
  * 3. 同价按名称降序(新版本号在前,如 gpt-5.6 先于 gpt-5.5)。
  */
 const sortedModels = computed(() => {
@@ -371,6 +402,9 @@ const sortedModels = computed(() => {
     const ta = billingMode(a) === BILLING_MODE_TOKEN
     const tb = billingMode(b) === BILLING_MODE_TOKEN
     if (ta !== tb) return ta ? -1 : 1
+    const preferred = (preferredModelOrder.get(a.name) ?? preferredModelOrder.size) -
+      (preferredModelOrder.get(b.name) ?? preferredModelOrder.size)
+    if (preferred !== 0) return preferred
     const pa = a.official_pricing?.output_price ?? null
     const pb = b.official_pricing?.output_price ?? null
     if (pa != null && pb != null && pa !== pb) return pb - pa
