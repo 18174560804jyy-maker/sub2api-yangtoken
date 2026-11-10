@@ -373,6 +373,7 @@ const preferredModelOrder = new Map([
   'gpt-6-sol',
   'gpt-5.6-sol',
   'gpt-5.6-terra',
+  'claude-fable-5-2',
   'claude-fable-5-1',
   'claude-fable-5',
   'claude-opus-5-5',
