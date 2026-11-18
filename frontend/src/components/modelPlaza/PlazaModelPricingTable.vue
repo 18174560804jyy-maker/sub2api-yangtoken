@@ -367,6 +367,8 @@ const accentStyle = computed(() => ({ '--plaza-accent': platformAccentColor(prop
 const PER_MILLION = 1_000_000
 
 const preferredModelOrder = new Map([
+  'gpt-6.2-astra',
+  'gpt-6.2-sol',
   'gpt-6-astra',
   'gpt-6.1-sol',
   'gpt-6.1-terra',
